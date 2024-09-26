@@ -8,8 +8,16 @@ on:
   push:
     branches:
       - "release"
+    #      - "master"
     tags:
-      - "*"
+      - "v*"
+    paths-ignore:
+      - ".github/workflows/*"
+
+  pull_request:
+    paths-ignore:
+      - ".github/workflows/*"
+
     # paths-ignore:
     #   - '**.md'
   # pull_request:
@@ -25,19 +33,9 @@ jobs:
     runs-on: ubuntu-latest
 
     if: github.event_name != 'pull_request'
-
-    strategy:
-      fail-fast: false
-
-    permissions:
-      contents: read
-      packages: write
-      attestations: write
-      id-token: write
-
     outputs:
       matrix: |
-        ["linux/amd64", "linux/arm/v7", "linux/arm/v8", "linux/arm64"]
+        ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v8"]
 
     steps:
       - name: Prepare
@@ -56,10 +54,13 @@ jobs:
             ${{ env.DOCKERHUB_SLUG }}
             ${{ env.GHCR_SLUG }}
           tags: |
-            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha
+      #      type=ref,event=branch
 
       - name: Rename meta bake definition file
         run: |
@@ -75,7 +76,8 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    # if: github.event_name != 'pull_request'
+
+    if: github.event_name != 'pull_request'
 
     needs:
       - prepare
@@ -118,6 +120,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
+          registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
@@ -137,6 +140,8 @@ jobs:
             .github/workflows/docker-bake.hcl
             /tmp/bake-meta.json
           targets: image
+          sbom: true
+          provenance: true
           set: |
             *.tags=
             *.platform=${{ matrix.platform }}
@@ -160,9 +165,18 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
+
     if: github.event_name != 'pull_request'
+
     needs:
       - build
+
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
     steps:
       - name: Download meta bake definition
         uses: actions/download-artifact@v4
@@ -180,11 +194,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+      # Note, I'm still not sure what's meant to be happening here. This is my best guess.
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -193,16 +203,56 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create manifest list and push
+      - name: Create manifest list and push (GHCR)
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.DOCKERHUB_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
-            $(printf '${{ env.DOCKERHUB_SLUG }}@sha256:%s ' *)
-          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map(select(startswith("${{ env.GHCR_SLUG }}")) | "-t " + .) | join(" ")' /tmp/bake-meta.json) \
+          docker buildx imagetools create \
+              $(jq -cr \
+                '.target."docker-metadata-action".tags | map(select(startswith("${{ env.GHCR_SLUG }}")) | "-t " + .) | join(" ")' \
+              /tmp/bake-meta.json) \
             $(printf '${{ env.GHCR_SLUG }}@sha256:%s ' *)
 
-      - name: Inspect image
+      - name: Inspect image (GHCR)
+        id: inspect_ghcr
         run: |
-          tag=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
-          docker buildx imagetools inspect ${{ env.DOCKERHUB_SLUG }}:${tag}
-          docker buildx imagetools inspect ${{ env.GHCR_SLUG }}:${tag}
+          TAG=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
+          docker buildx imagetools inspect \
+            ${{ env.GHCR_SLUG }}:${TAG} \
+            --format "{{json .Manifest}}" | jq -r '"GHCR_DIGEST=" + .digest' >> $GITHUB_ENV
+
+      - name: Generate artifact attestation (GHCR)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.GHCR_SLUG }}
+          subject-digest: ${{ env.GHCR_DIGEST }}
+          push-to-registry: true
+#       - name: Login to DockerHub
+#         uses: docker/login-action@v3
+#         with:
+#           registry: index.docker.io
+#           username: ${{ secrets.DOCKERHUB_USERNAME }}
+#           password: ${{ secrets.DOCKERHUB_TOKEN }}
+#
+#       - name: Create manifest list and push (DockerHub)
+#         working-directory: /tmp/digests
+#         run: |
+#           docker buildx imagetools create \
+#               $(jq -cr \
+#                 '.target."docker-metadata-action".tags | map(select(startswith("${{ env.DOCKERHUB_SLUG }}")) | "-t " + .) | join(" ")' \
+#               /tmp/bake-meta.json) \
+#               $(printf '${{ env.DOCKERHUB_SLUG }}@sha256:%s ' *)
+#
+#       - name: Inspect image (DockerHub)
+#         id: inspect_dockerhub
+#         run: |
+#           TAG=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
+#           docker buildx imagetools inspect \
+#             ${{ env.DOCKERHUB_SLUG }}:${TAG} \
+#             --format "{{json .Manifest}}" | jq -r '"DOCKERHUB_DIGEST=" + .digest' >> $GITHUB_ENV
+#
+#       - name: Generate artifact attestation (DockerHub)
+#         uses: actions/attest-build-provenance@v1
+#         with:
+#           subject-name: ${{ env.DOCKERHUB_SLUG }}
+#           subject-digest: ${{ env.DOCKERHUB_DIGEST }}
+#           push-to-registry: true
