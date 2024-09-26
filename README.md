@@ -5,7 +5,7 @@ authors:
 date:
   month: September
   year: 2024
-revision: v.1.1.1
+revision: v.1.1.2
 pdfulator_features: shade_monospace narrow_monospace justify
 ...
 
