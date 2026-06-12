@@ -1,3 +1,4 @@
+.DS_Store
 .vscode
 /tmp
 ._*
@@ -11,4 +12,7 @@
 # Note, the PDF wouldn't usually be included, but as it's uniquely part of
 # pdf generation instruction, it's included as example.
 !README.pdf
+
+node_modules/
+pdfulator
 

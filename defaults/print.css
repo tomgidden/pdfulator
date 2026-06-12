@@ -1,178 +1,87 @@
-/* @import url(/defaults/'https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap'); */
-/* TeX Gyre Pagella, an open-source Palatino lookalike, is installed by `fonts-texgyre` APT package in the Dockerfile */
+/* ==========================================================================
+   pdfulator default print stylesheet
+   ========================================================================== */
 
-html {
-  --S: 12pt;
-  --S2: 24pt;
-  --S1-75: 21pt;
-  --S1-5: 18pt;
-  --S1-25: 15pt;
-  --S0-85: 10pt;
-
-  --LL: calc(-1 * var(--L));
-  --L: 18pt;
-  --L0-5: 9pt;
-  --L1-5: 27pt;
-  --L2: 36pt;
-  --L3: 54pt;
-
-  --I: 1in;
-  --II: calc(-1 * var(--I));
-
-  --shade-monospace-color: #f7f7f7;
-}
-
-body {
-  font-family: "TeX Gyre Pagella";
-  font-optical-sizing: auto;
-  font-weight: 400;
-}
-
-h1,h2,h3,h4,h5,h6 {
-  font-family: "Open Sans Variable", sans-serif;
-  font-optical-sizing: auto;
-  font-weight: 600;
-  font-style: normal;
-}
-
-article>hgroup>h1 {
-  font-family: "Open Sans Variable", sans-serif;
-  font-optical-sizing: auto;
-  font-weight: 700;
-}
+/* --------------------------------------------------------------------------
+   Custom fonts
+   -------------------------------------------------------------------------- */
 
 @font-face {
   font-family: 'TeX Gyre Pagella';
   font-display: swap;
-  src: url(/defaults/texgyrepagella-regular.otf) format('opentype');
+  src: url(texgyrepagella-regular.otf) format('opentype');
 }
 @font-face {
   font-family: 'TeX Gyre Pagella';
   font-display: swap;
   font-style: italic;
-  src: url(/defaults/texgyrepagella-italic.otf) format('opentype');
+  src: url(texgyrepagella-italic.otf) format('opentype');
 }
 @font-face {
   font-family: 'TeX Gyre Pagella';
   font-display: swap;
   font-weight: 600;
-  src: url(/defaults/texgyrepagella-bold.otf) format('opentype');
+  src: url(texgyrepagella-bold.otf) format('opentype');
 }
 @font-face {
   font-family: 'TeX Gyre Pagella';
   font-display: swap;
   font-style: italic;
   font-weight: 600;
-  src: url(/defaults/texgyrepagella-bolditalic.otf) format('opentype');
+  src: url(texgyrepagella-bolditalic.otf) format('opentype');
+}
+@font-face {
+  font-family: 'Open Sans Variable';
+  font-display: swap;
+  src: url(OpenSans-VariableFont_wdth,wght.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Open Sans Variable';
+  font-style: italic;
+  font-display: swap;
+  src: url(OpenSans-Italic-VariableFont_wdth,wght.ttf) format('truetype');
 }
 @font-face {
   font-family: 'Noto Sans Mono Variable';
   font-display: swap;
-  src: url(/defaults/NotoSansMono-VariableFont_wdth,wght.ttf) format('truetype');
-}
-@font-face {
-  font-family: 'Open Sans Variable';
-  font-display: swap;
-  src: url(/defaults/OpenSans-VariableFont_wdth,wght.ttf) format('truetype');
-}
-@font-face {
-  font-family: 'Open Sans Variable';
-  font-style: italic;
-  font-display: swap;
-  src: url(/defaults/OpenSans-Italic-VariableFont_wdth,wght.ttf) format('truetype');
+  src: url(NotoSansMono-VariableFont_wdth,wght.ttf) format('truetype');
 }
 
-pre, code {
-  font-family: "Noto Sans Mono Variable";
-  /* font-variation-settings: "wdth" 100; */
-  /* font-weight: 400; */
-  font-size: 0.85em;
+/* --------------------------------------------------------------------------
+   Design tokens
+   -------------------------------------------------------------------------- */
+
+html {
+  --S:      12pt;
+  --S0-85:  10pt;
+  --S1-25:  15pt;
+  --S1-5:   18pt;
+  --S1-75:  21pt;
+  --S2:     24pt;
+
+  --L:      18pt;
+  --L0-5:   9pt;
+  --L1-5:   27pt;
+  --L2:     36pt;
+  --L3:     54pt;
+  --LL:     calc(-1 * var(--L));
+
+  --I:      1in;
+  --II:     calc(-1 * var(--I));
+
+  --shade-monospace-color: #f7f7f7;
 }
 
-.strong_monospace code,
-.strong_monospace pre {
-  font-weight: 600;
-}
-  
-.narrow_monospace pre,
-.narrow_monospace code {
-  font-family: "Noto Sans Mono Variable";
-  font-variation-settings: "wdth" 62.5;
-}
-
-.shade_monospace pre,
-.shade_monospace code,
-.shade_pre pre,
-.shade_code code {
-  background-color: var(--shade-monospace-color);
-  outline: 0.25em solid var(--shade-monospace-color);
-  border-radius: 0.125em;
-}
-
-.shade_monospace code,
-.shade_code code {
-  margin-left: 0.125em;
-  margin-right: 0.125em;
-  padding-left: 0.125em;
-  padding-right: 0.125em;
-}
-
-/* Pandoc nests <pre><code>...</code></pre> to do ``` blocks, so we need to undo the padding. */
-.shade_monospace pre code,
-.shade_code pre code {
-  margin:0;
-  padding:0;
-  outline: none;
-  background-color: none;
-  border-radius: none;
-}
-
-header,footer {
-  display: none;
-}
-
-h1,h2,h3,h4,h5,h6,p,ul,ol,dl,pre,li {
-  margin: 0;
-  padding: 0;
-}
-
-/* 
-body {
-  background-image: linear-gradient(to bottom, #eee 1px, transparent 1px);
-  background-size: 100% var(--L);
-}
-
-p {
-  outline: 1px solid red;
-}
-
-h1,h2,h3,h4,h5,h6 {
-  outline: 1px solid blue;
-} */
-
-body {
-  margin: 0;
-  padding: 0;
-
-  font-style: normal;
-  text-rendering: optimizeLegibility;
-  text-wrap: pretty;
-
-  hyphens: auto;
-  overflow-wrap: break-word;
-  font-kerning: auto;
-
-  color: black;
-  font-size: var(--S);
-  line-height: var(--L);
-}
+/* --------------------------------------------------------------------------
+   Page layout
+   -------------------------------------------------------------------------- */
 
 @page {
   size: A4;
   margin: 1in 0.75in;
 
   @top-right {
-    content: string("");
+    content: '';
     height: 72pt;
     margin-top: var(--L);
     background-image: url(/theme/logo.svg);
@@ -182,317 +91,400 @@ body {
   }
 
   @bottom-left {
-    font-family: "Open Sans Variable";
+    font-family: 'Open Sans Variable', sans-serif;
     font-weight: 600;
     font-size: var(--S0-85);
-    content: element(pageFooter);
+    content: string(footerLeft);
   }
 
   @bottom-right {
-    font-family: "Open Sans Variable";
+    font-family: 'Open Sans Variable', sans-serif;
     font-weight: 600;
     font-size: var(--S0-85);
     content: counter(page);
   }
 }
 
-#pageHeader {
-  position: running(pageHeader);
+/* --------------------------------------------------------------------------
+   Running footer strings
+   The doc title is always the baseline footer string, set from .doc-title.
+   feature classes on <body> can override to track headings instead.
+   -------------------------------------------------------------------------- */
+
+/* Baseline: always track the document title */
+.doc-title {
+  string-set: footerLeft content();
 }
 
-#pageFooter {
-  position: running(pageFooter);
+/* footer-title: same as default — explicit opt-in */
+body.footer-title .doc-title {
+  string-set: footerLeft content();
 }
 
-h1,h2,h3,h4,h5,h6 {
+/* footer-h1: reset string on every h1 in <main> */
+body.footer-h1 main h1 {
+  string-set: footerLeft content();
+}
+
+/* footer-h2: reset string on every h2 in <main> */
+body.footer-h2 main h2 {
+  string-set: footerLeft content();
+}
+
+/* footer-h3: reset string on every h3 in <main> */
+body.footer-h3 main h3 {
+  string-set: footerLeft content();
+}
+
+/* footer-h4: reset string on every h4 in <main> */
+body.footer-h4 main h4 {
+  string-set: footerLeft content();
+}
+
+/* #pageFooterLeft sets footerLeft as the initial value before <main> content.
+   Heading string-set rules in main will override it page-by-page as they flow. */
+#pageFooterLeft {
+  string-set: footerLeft content();
+}
+
+/* Hide footer source elements from normal flow */
+#pageFooterLeft,
+#pageFooterRight {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Base typography
+   -------------------------------------------------------------------------- */
+
+body {
+  font-family: 'TeX Gyre Pagella', Palatino, serif;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  font-style: normal;
+
+  margin: 0;
+  padding: 0;
+
+  color: black;
+  font-size: var(--S);
+  line-height: var(--L);
+
+  text-rendering: optimizeLegibility;
+  text-wrap: pretty;
+  hyphens: auto;
+  overflow-wrap: break-word;
+  font-kerning: auto;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Open Sans Variable', sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 600;
+  font-style: normal;
+  margin: 0;
+  padding: 0;
   margin-top: var(--L);
+  margin-bottom: 0;
 }
 
-h1+h2,h1+h3,h1+h4,h1+h5,h1+h6,
-h2+h3,h2+h4,h2+h5,h2+h6,
-h3+h4,h3+h5,h3+h6,
-h4+h5,h4+h6,
+/* Don't double-space consecutive headings */
+h1+h2, h1+h3, h1+h4, h1+h5, h1+h6,
+h2+h3, h2+h4, h2+h5, h2+h6,
+h3+h4, h3+h5, h3+h6,
+h4+h5, h4+h6,
 h5+h6 {
   margin-top: 0;
 }
 
+h1 { font-size: var(--S1-75); line-height: var(--L2); font-weight: 800; }
+h2 { font-size: var(--S1-75); line-height: var(--L2); font-weight: 600; }
+h3 { font-size: var(--S1-5);  line-height: var(--L2); font-weight: 600; }
+h4 { font-size: var(--S1-25); line-height: var(--L2); font-weight: 600; }
+h5 { font-size: var(--S);     line-height: var(--L);  font-weight: 600; }
+h6 { font-size: var(--S);     line-height: var(--L);  font-weight: 500; }
 
-h1,h2,h3,h4,h5,h6 {
-  margin-left: var(--II);
+/* --------------------------------------------------------------------------
+   Document header (hgroup)
+   -------------------------------------------------------------------------- */
+
+article > hgroup {
+  line-height: var(--L);
+  margin-bottom: var(--L2);
 }
+
+article > hgroup > .doc-title {
+  font-family: 'Open Sans Variable', sans-serif;
+  font-size: var(--S1-75);
+  line-height: var(--L2);
+  font-weight: 700;
+  margin-top: 0;
+}
+
+.doc-subtitle {
+  font-family: 'Open Sans Variable', sans-serif;
+  font-size: var(--S1-25);
+  font-weight: 400;
+  margin: 0;
+}
+
+.doc-author {
+  font-style: normal;
+  margin-top: var(--L0-5);
+}
+
+.author-affiliation::before { content: ', '; }
+.author-email::before       { content: ' <'; }
+.author-email::after        { content: '>'; }
+
+.doc-project,
+.doc-date,
+.doc-revision {
+  display: block;
+  margin-top: var(--L0-5);
+}
+
+/* --------------------------------------------------------------------------
+   Page layout — indented body with outdented headings
+   -------------------------------------------------------------------------- */
 
 main {
   margin-left: var(--I);
 }
 
-.justify main p {
+main h1,
+main h2,
+main h3,
+main h4,
+main h5,
+main h6 {
+  margin-left: var(--II);
+}
+
+/* .wide — remove body indent */
+body.wide main,
+body.wide main h1,
+body.wide main h2,
+body.wide main h3,
+body.wide main h4,
+body.wide main h5,
+body.wide main h6 {
+  margin-left: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Body content
+   -------------------------------------------------------------------------- */
+
+p, ul, ol, dl, pre, blockquote {
+  margin: 0;
+  padding: 0;
+  line-height: var(--L);
+}
+
+p+p,
+p+blockquote, blockquote+p,
+p+dl,         dl+p,
+p+pre,        pre+p,
+dl+dl,        dl+blockquote, dl+pre,
+pre+pre,      pre+blockquote,
+blockquote+blockquote {
+  margin-top: var(--L);
+}
+
+/* .justify — justify body text */
+body.justify main p {
   text-align: justify;
 }
 
-.strong_href main a {
+/* .strong_href — make links visible in print */
+body.strong_href main a {
   text-decoration: underline;
   font-weight: bold;
   color: black;
 }
 
-time { display: block; }
-div.revision { display: block; }
+a       { color: black; text-decoration: none; }
+a:visited { color: black; }
 
-.wide main,
-.wide main h1,
-.wide main h2,
-.wide main h3,
-.wide main h4,
-.wide main h5,
-.wide main h6 {
-    margin-left: 0;
-}
+/* --------------------------------------------------------------------------
+   Lists
+   -------------------------------------------------------------------------- */
 
-main pre {  margin-left: var(--L2); }
-.wide main pre {  margin-left: 0; }
-.wide_pre main pre {  margin-left: 0; }
-.wide.wide_pre main pre {  margin-left: var(--L2); }
-
-footer span::after {
-  content: "   |  ";
-}
-footer span:last-child::after {
-  content: "";
-}
-
-article>hgroup {
-  line-height: var(--L);
-  margin-left: var(--I);
-  margin-bottom: var(--L);
-}
-
-article>hgroup>h1 {
-  margin-left: var(--II);
-}
-
-article>hgroup>address affiliation+.mailto::before {
-  content: ", ";
-}
-
-article>hgroup>address affiliation::before {
-  content: ", ";
-}
-
-
-h1 {
-  font-size: var(--S1-75);
-  line-height: var(--L2);
-  font-weight: 800;
-}
-
-h2 {
-  font-size: var(--S1-75);
-  line-height: var(--L2);
-  font-weight: 600;
-}
-
-h3 {
-  font-size: var(--S1-5);
-  line-height: var(--L2);
-  font-weight: 600;
-}
-
-h4 {
-  font-size: var(--S1-25);
-  line-height: var(--L2);
-  font-weight: 600;
-}
-
-h5 {
-  font-size: var(--S1);
-  line-height: var(--L);
-  font-weight: 600;
-}
-
-h6 {
-  font-size: var(--S1);
-  line-height: var(--L);
-  font-weight: 500;
-}
-
-h1,h2,h3,h4,h5,h6 {
-  margin-bottom: 0;
-}
-
-@media print {
-
-  p,h2,h3,h4 {
-    orphans: 3;
-    widows: 3;
-  }
-
-  h1,h2,h3,h4,h5,h6 {
-    page-break-after: avoid;
-  }
-}
-
-p,ul,ol,dl,pre,blockquote {
-  line-height: var(--L);
-  margin: 0;
-}
-
-/* Pagedjs doesn't like this:   :is(p, dl, pre, blockquote):has(+ :is(p, dl, pre, blockquote)) { */
-p+blockquote,
-dl+blockquote,
-pre+blockquote,
-blockquote+blockquote,
-
-p+p,
-dl+p,
-pre+p,
-blockquote+p,
-
-p+dl,
-dl+dl,
-pre+dl,
-blockquote+dl,
-
-p+pre,
-dl+pre,
-pre+pre,
-blockquote+pre {
-  margin-top: var(--L);
-}
-
-ol>li,
-ul>li {
+ol > li,
+ul > li {
   margin-left: var(--L2);
   list-style-type: square;
 }
 
-ol>li:has(p),
-ul>li:has(p) {
+ol > li:has(p),
+ul > li:has(p) {
   margin-bottom: var(--L);
 }
 
-ol+p, ul+p {
-  margin-top: var(--L);
-}
+ol + p, ul + p { margin-top: var(--L); }
 
-li>ol,
-li>ul {}
-
-li>ol>li,
-li>ul>li {
+li > ol > li,
+li > ul > li {
   list-style-type: circle;
 }
 
-ol,
-ul {
-  /* padding-left: var(--L2); */
+/* Task lists */
+ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
 }
 
-p code {
-  /* font-size: var(--S0-85); */
+ul.contains-task-list li {
+  margin-left: var(--L2);
 }
 
-code {
-  /* font-size: var(--S0-85); */
+/* Definition lists */
+dt {
+  font-weight: 600;
+  margin-top: var(--L0-5);
+}
+
+dd {
+  margin-left: var(--L2);
+}
+
+/* --------------------------------------------------------------------------
+   Code and preformatted text
+   -------------------------------------------------------------------------- */
+
+pre, code {
+  font-family: 'Noto Sans Mono Variable', monospace;
+  font-size: var(--S0-85);
   line-height: var(--L);
-  /* overflow: hidden; */
-  /* white-space: pre-wrap; */
 }
 
 pre {
   margin-top: var(--L);
   margin-bottom: var(--L);
+  margin-left: var(--L2);
   padding: 0;
   overflow: auto;
   overflow-wrap: normal;
   hyphens: manual;
-  line-height: var(--L);
   white-space: pre-wrap;
 }
 
-a {
-  color: black;
-  text-decoration: none;
+body.wide pre,
+body.wide_pre pre {
+  margin-left: 0;
 }
 
-a:visited {
-  color: black;
+body.wide.wide_pre pre {
+  margin-left: var(--L2);
 }
 
-img {
-  max-width: 100%;
+body.narrow_monospace pre,
+body.narrow_monospace code {
+  font-variation-settings: "wdth" 62.5;
 }
 
-svg {
-  height: auto;
-  max-width: 100%;
+body.strong_monospace pre,
+body.strong_monospace code {
+  font-weight: 600;
 }
+
+body.shade_monospace pre,
+body.shade_monospace code,
+body.shade_pre pre,
+body.shade_code code {
+  background-color: var(--shade-monospace-color);
+  outline: 0.25em solid var(--shade-monospace-color);
+  border-radius: 0.125em;
+}
+
+body.shade_monospace code,
+body.shade_code code {
+  margin-left: 0.125em;
+  margin-right: 0.125em;
+  padding-left: 0.125em;
+  padding-right: 0.125em;
+}
+
+/* Pandoc / markdown-it nest <pre><code> for fenced blocks */
+body.shade_monospace pre code,
+body.shade_code pre code {
+  margin: 0;
+  padding: 0;
+  outline: none;
+  background-color: transparent;
+  border-radius: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Blockquotes
+   -------------------------------------------------------------------------- */
 
 blockquote {
   padding-left: var(--L2);
   border-left: 2px solid #e6e6e6;
   font-style: italic;
-  /* color: #606060; */
 }
 
-.sourceCode {
-  background-color: transparent;
-  overflow: visible;
+/* --------------------------------------------------------------------------
+   Tables
+   -------------------------------------------------------------------------- */
+
+table {
+  margin: var(--L) 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: lining-nums tabular-nums;
 }
+
+thead {
+  border-bottom: 1px solid #1a1a1a;
+}
+
+tbody {
+  border-bottom: 1px solid #1a1a1a;
+}
+
+th {
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+td {
+  padding: 0.125rem 0.5rem 0.25rem;
+}
+
+/* --------------------------------------------------------------------------
+   Images and figures
+   -------------------------------------------------------------------------- */
+
+img { max-width: 100%; }
+svg { height: auto; max-width: 100%; }
+
+figure {
+  margin: var(--L) 0;
+  text-align: center;
+}
+
+figcaption {
+  font-size: var(--S0-85);
+  font-style: italic;
+  margin-top: var(--L0-5);
+}
+
+/* --------------------------------------------------------------------------
+   Miscellaneous
+   -------------------------------------------------------------------------- */
 
 hr {
   background-color: #1a1a1a;
   border: none;
   height: 1px;
-  margin: 1rem 0;
+  margin: var(--L) 0;
 }
 
-table {
-  margin: 1rem 0;
-  border-collapse: collapse;
-  width: 100%;
-  overflow-x: auto;
-  display: block;
-  font-variant-numeric: lining-nums tabular-nums;
-}
-
-table caption {
-  margin-bottom: 0.75rem;
-}
-
-tbody {
-  margin-top: 0.5rem;
-  border-top: 1px solid #1a1a1a;
-  border-bottom: 1px solid #1a1a1a;
-}
-
-th {
-  border-top: 1px solid #1a1a1a;
-  padding: 0.25rem 0.5rem 0.25rem 0.5rem;
-}
-
-td {
-  padding: 0.125rem 0.5rem 0.25rem 0.5rem;
-}
-
-#TOC li {
-  list-style: none;
-}
-
-#TOC ul {
-  padding-left: 1.3rem;
-}
-
-#TOC>ul {
-  padding-left: 0;
-}
-
-#TOC a:not(:hover) {
-  text-decoration: none;
-}
-
-span.smallcaps {
-  font-variant: small-caps;
-}
+span.smallcaps { font-variant: small-caps; }
 
 div.columns {
   display: flex;
@@ -509,21 +501,25 @@ div.hanging-indent {
   text-indent: -1.5rem;
 }
 
-/* The extra [class] is a hack that increases specificity enough to
-   override a similar rule in reveal.js */
-ul.task-list[class] {
-  list-style: none;
-}
+/* --------------------------------------------------------------------------
+   Paged media — breaks and pagination
+   -------------------------------------------------------------------------- */
 
-ul.task-list li input[type="checkbox"] {
-  font-size: inherit;
-  width: 0.8rem;
-  margin: 0 0.8rem 0.2rem -1.6rem;
-  vertical-align: middle;
-}
+@media print {
+  p, h2, h3, h4 {
+    orphans: 3;
+    widows: 3;
+  }
 
-.display.math {
-  display: block;
-  text-align: center;
-  margin: 0.5rem auto;
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+  }
+
+  pre, blockquote {
+    page-break-inside: avoid;
+  }
+
+  tr, img {
+    page-break-inside: avoid;
+  }
 }
