@@ -1,0 +1,18 @@
+{
+  "name": "pdfulator",
+  "version": "1.0.0",
+  "description": "Markdown to PDF converter",
+  "type": "module",
+  "bin": {
+    "pdfulator": "./pdfulator.js"
+  },
+  "dependencies": {
+    "@vivliostyle/viewer": "^2.0.0",
+    "js-yaml": "^4.1.0",
+    "markdown-it": "^14.0.0",
+    "markdown-it-deflist": "^3.0.0",
+    "markdown-it-task-lists": "^2.1.1",
+    "mustache": "^4.2.0",
+    "puppeteer-core": "^22.0.0"
+  }
+}

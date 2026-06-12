@@ -2,68 +2,37 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>$title$</title>
+  <title>{{title}}</title>
   <link rel="stylesheet" href="/defaults/print.css">
   <link rel="stylesheet" href="/theme/print.css">
+  {{#css}}<link rel="stylesheet" href="{{css}}">{{/css}}
 </head>
-<body class="$pdfulator_features$">
+<body class="{{pdfulator_features}}">
+
   <article>
-    <header id="pageHeader">$title$</header>
-    <footer id="pageFooter">
-      $if(copyright)$<span>© $year$, $copyright$</span>$endif$
-      $if(footer)$<span>$footer$</span>$endif$
-      $if(revision)$<span>$revision$</span>$endif$
-    </footer>
-    <title>$title$</title>
 
     <hgroup>
-      <h1>$title$</h1>
-      $if(subtitle)$
-        <p>$subtitle$</p>
-      $endif$
+      <h1 class="doc-title">{{{title}}}</h1>
+      {{#subtitle}}<p class="doc-subtitle">{{{subtitle}}}</p>{{/subtitle}}
 
-      $for(authors)$
-        <address>$if(authors.name)$$authors.name$$elseif(authors.firstname)$$if(authors.surname)$$authors.firstname$ $authors.surname$$endif$$endif$$if(authors.affiliation)$<affiliation>$authors.affiliation$</affiliation>$endif$$if(authors.email)$&nbsp;<span class="mailto"><a href="mailto:$authors.email$">&lt;$authors.email$&gt;</a></span>$endif$</address>
-      $endfor$
+      {{#authors}}
+      <address class="doc-author">
+        <span class="author-name">{{name}}</span>{{#affiliation}}<span class="author-affiliation">{{affiliation}}</span>{{/affiliation}}{{#email}}<span class="author-email"><a href="mailto:{{email}}">{{email}}</a></span>{{/email}}
+      </address>
+      {{/authors}}
 
-      $if(project)$
-        <div class="project product">$project$</div>
-      $elseif(product)$
-        <div class="project product">$product$</div>
-      $elseif(productname)$
-        <div class="project product">$productname$</div>
-      $endif$
-
-      $if(date)$
-      <time>
-        $if(date.day)$$date.day$$endif$
-        $if(date.month)$$date.month$$endif$
-        $if(date.year)$$date.year$$endif$
-      </time>
-      $endif$
-
-      $if(revision)$
-      <div class="revision">$revision$</div>
-      $endif$
-
+      {{#project}}<div class="doc-project">{{project}}</div>{{/project}}
+      {{#date}}<time class="doc-date">{{date}}</time>{{/date}}
+      {{#revision}}<div class="doc-revision">{{revision}}</div>{{/revision}}
     </hgroup>
 
-    $for(include-before)$
-    <aside class="preamble">
-    $include-before$
-    </aside>
-    $endfor$
+    <div id="pageFooterLeft" class="page-footer-left">{{#copyright}}<span class="footer-copyright">© {{year}} {{copyright}}</span>{{/copyright}}{{#footer}}<span class="footer-text">{{footer}}</span>{{/footer}}{{#revision}}<span class="footer-revision">{{revision}}</span>{{/revision}}{{^copyright}}{{^footer}} {{/footer}}{{/copyright}}</div>
 
     <main>
-    $body$
+      {{{body}}}
     </main>
 
-    $for(include-after)$
-    <aside class="postamble">
-    $include-after$
-    </aside>
-    $endfor$
   </article>
+
 </body>
 </html>
-
