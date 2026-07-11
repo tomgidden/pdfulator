@@ -55,7 +55,8 @@ function convert_to_pdf {
   # Convert HTML to PDF
   pagedjs-cli \
     -i "$SUBWORKDIR/$LEAF.html" \
-    -o "$OUT"
+    -o "$OUT" \
+    --browserArgs "--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage"
 
   return 0
 }
