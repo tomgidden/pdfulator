@@ -35,7 +35,7 @@ jobs:
     if: github.event_name != 'pull_request'
     outputs:
       matrix: |
-        ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v8"]
+        ["linux/amd64", "linux/arm64"]
 
     steps:
       - name: Prepare
@@ -226,33 +226,34 @@ jobs:
           subject-name: ${{ env.GHCR_SLUG }}
           subject-digest: ${{ env.GHCR_DIGEST }}
           push-to-registry: true
-#       - name: Login to DockerHub
-#         uses: docker/login-action@v3
-#         with:
-#           registry: index.docker.io
-#           username: ${{ secrets.DOCKERHUB_USERNAME }}
-#           password: ${{ secrets.DOCKERHUB_TOKEN }}
-#
-#       - name: Create manifest list and push (DockerHub)
-#         working-directory: /tmp/digests
-#         run: |
-#           docker buildx imagetools create \
-#               $(jq -cr \
-#                 '.target."docker-metadata-action".tags | map(select(startswith("${{ env.DOCKERHUB_SLUG }}")) | "-t " + .) | join(" ")' \
-#               /tmp/bake-meta.json) \
-#               $(printf '${{ env.DOCKERHUB_SLUG }}@sha256:%s ' *)
-#
-#       - name: Inspect image (DockerHub)
-#         id: inspect_dockerhub
-#         run: |
-#           TAG=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
-#           docker buildx imagetools inspect \
-#             ${{ env.DOCKERHUB_SLUG }}:${TAG} \
-#             --format "{{json .Manifest}}" | jq -r '"DOCKERHUB_DIGEST=" + .digest' >> $GITHUB_ENV
-#
-#       - name: Generate artifact attestation (DockerHub)
-#         uses: actions/attest-build-provenance@v1
-#         with:
-#           subject-name: ${{ env.DOCKERHUB_SLUG }}
-#           subject-digest: ${{ env.DOCKERHUB_DIGEST }}
-#           push-to-registry: true
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          registry: index.docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create manifest list and push (DockerHub)
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+              $(jq -cr \
+                '.target."docker-metadata-action".tags | map(select(startswith("${{ env.DOCKERHUB_SLUG }}")) | "-t " + .) | join(" ")' \
+              /tmp/bake-meta.json) \
+              $(printf '${{ env.DOCKERHUB_SLUG }}@sha256:%s ' *)
+
+      - name: Inspect image (DockerHub)
+        id: inspect_dockerhub
+        run: |
+          TAG=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
+          docker buildx imagetools inspect \
+            ${{ env.DOCKERHUB_SLUG }}:${TAG} \
+            --format "{{json .Manifest}}" | jq -r '"DOCKERHUB_DIGEST=" + .digest' >> $GITHUB_ENV
+
+      - name: Generate artifact attestation (DockerHub)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.DOCKERHUB_SLUG }}
+          subject-digest: ${{ env.DOCKERHUB_DIGEST }}
+          push-to-registry: true

@@ -34,5 +34,5 @@ build:
 	docker build -t $(TAG) .
 
 release:
-	docker buildx build --push --platform linux/arm/v7,linux/arm64/v8,linux/amd64 --tag $(TAG) .
+	docker buildx build --push --platform linux/arm64,linux/amd64 --tag $(TAG) .
 
