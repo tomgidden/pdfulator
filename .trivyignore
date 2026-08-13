@@ -1,0 +1,51 @@
+# Vulnerabilities accepted as not applicable to this image.
+#
+# Reviewed 2026-08-14 against tomgidden/pdfulator:sha-ae190c7.
+# Re-check when pagedjs-cli bumps Puppeteer, or if the entrypoint ever
+# starts downloading a browser at runtime instead of using the apt one.
+
+# --- Puppeteer browser-download path: unreachable ---
+#
+# tar-fs and extract-zip are pulled in only by @puppeteer/browsers/install.js,
+# i.e. the routine that downloads and unpacks a Chromium tarball. We install
+# Chromium from apt and disable that path twice over, via
+# PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true and PUPPETEER_EXECUTABLE_PATH.
+# Verified: pagedjs-cli has no reference to @puppeteer/browsers, and nothing
+# else in the tree requires either package. No untrusted tarball is ever
+# extracted, so the tar traversal / symlink bypass bugs have no trigger.
+#
+# CVE-2026-56876 additionally has no fixed version available at all.
+CVE-2024-12905  # tar-fs: link following / path traversal via crafted tar
+CVE-2025-48387  # tar-fs: extract can write outside the target dir
+CVE-2025-59343  # tar-fs: symlink validation bypass
+CVE-2026-56876  # extract-zip: arbitrary file write via symlink bypass (no fix)
+
+# --- Puppeteer DevTools transport: reachable, but not exposed ---
+#
+# ws backs NodeWebSocketTransport, which drives Chromium over the DevTools
+# protocol. This code does run. Both CVEs are denial-of-service via crafted
+# frames or header floods, and the only peer on that socket is the Chromium
+# process our own entrypoint spawns, on loopback. An attacker able to send
+# frames there already has code execution inside the container, at which
+# point a DoS against our own browser is not the relevant threat.
+CVE-2024-37890  # ws: DoS via request with many HTTP headers
+CVE-2026-48779  # ws: DoS via memory exhaustion from small fragments
+
+# --- npm's own bundled dependencies: not ours to patch ---
+#
+# These live in npm's vendored tree shipped with the node:slim base image,
+# not in the application dependency graph. They are only reachable while
+# running npm itself, which happens at build time, not at render time.
+# Fixing them means waiting for a base image with a newer npm.
+CVE-2026-14257  # brace-expansion: DoS via memory exhaustion in expand()
+CVE-2026-69152  # brace-expansion: DoS bypassing the CVE-2026-14257 mitigation
+CVE-2026-69192  # ip-address: inconsistent parsing leading to SSRF
+
+# --- Note on the remaining OS criticals ---
+#
+# Not ignored, deliberately: the perl / libglib2.0 / libxml2 criticals that
+# survive are all status=affected or fix_deferred, i.e. Debian has published
+# no patched version. They are unfixable rather than not-applicable, and
+# should clear themselves when trixie ships updates. Switching base image
+# does not help; bookworm scores worse, and Alpine lacks a usable
+# pandoc + Chromium + Puppeteer stack.

@@ -10,15 +10,21 @@ LABEL org.opencontainers.image.source="https://github.com/tomgidden/pdfulator"
 LABEL org.opencontainers.image.license="MIT"
 
 # Install Chromium, Pandoc and a couple of developer conveniences.
-# Remove package files afterwards to minimise footprint
+# Remove package files afterwards to minimise footprint.
+#
+# --no-install-recommends matters here: Chromium recommends a printer-config
+# GUI stack (system-config-printer-common -> python3-smbc -> libsmbclient0 ->
+# samba-libs -> libldb2 -> liblmdb0), which a headless renderer never uses.
+# It accounted for most of the image's critical CVEs and ~400MB.
+# ca-certificates is now explicit, as it previously arrived as a recommend.
 RUN <<EOF
 apt-get update
-apt-get install -y wget gnupg
+apt-get install -y --no-install-recommends wget gnupg ca-certificates
 wget -q -O /etc/apt/trusted.gpg.d/linux_signing_key.asc https://dl-ssl.google.com/linux/linux_signing_key.pub
 echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
 
 apt-get update
-apt-get install -y chromium bash pandoc inotify-tools zsh
+apt-get install -y --no-install-recommends chromium bash pandoc inotify-tools zsh
 rm -rf /var/lib/apt/lists/*
 EOF
 
