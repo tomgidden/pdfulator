@@ -2,17 +2,18 @@
  * I add this to html files generated with pandoc.
  */
 
- html {
-  font-size: 100%;
+html {
+  font-size: 16px;
   overflow-y: scroll;
   -webkit-text-size-adjust: 100%;
   -ms-text-size-adjust: 100%;
+  font-family: Palatino, 'Palatino Linotype', Times, 'Times New Roman', serif;
 }
 
 body {
   color: #444;
   font-family: Palatino, 'Palatino Linotype', Times, 'Times New Roman', serif;
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1.7;
   padding: 1em;
   margin: auto;

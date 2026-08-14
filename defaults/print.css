@@ -2,12 +2,12 @@
 /* TeX Gyre Pagella, an open-source Palatino lookalike, is installed by `fonts-texgyre` APT package in the Dockerfile */
 
 html {
-  --S: 12pt;
-  --S2: 24pt;
-  --S1-75: 21pt;
-  --S1-5: 18pt;
-  --S1-25: 15pt;
-  --S0-85: 10pt;
+  --S: 15pt;
+  --S2: calc(2 * var(--S));
+  --S1-75: calc(1.75 * var(--S));
+  --S1-5: calc(1.5 * var(--S));
+  --S1-25: calc(1.25 * var(--S));
+  --S0-85: calc(0.85 * var(--S));
 
   --LL: calc(-1 * var(--L));
   --L: 18pt;
