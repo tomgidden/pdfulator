@@ -10,6 +10,8 @@
 #   --browser auto|find|install|<path>   choose a browser (remembered)
 #   --install-runtime                    download bun if none is installed
 #   --setup-status                       report what is still needed
+#   --update [--check|--yes|--force]     fetch and install a newer release
+#   --version                            report the installed version
 #   --uninstall                          remove pdfulator, keeping your edits
 set -e
 
@@ -20,6 +22,11 @@ STAMP="$PDFULATOR_HOME/.installed"
 MANIFEST="$PDFULATOR_HOME/.manifest"
 BROWSER_CONF="$PDFULATOR_HOME/.browser"
 RUNTIME_CONF="$PDFULATOR_HOME/.runtime"
+VERSION_FILE="$PDFULATOR_HOME/VERSION"
+
+# Where --update looks for what's been released. Overridable for testing and
+# for anyone running their own build.
+PDFULATOR_MANIFEST_URL="${PDFULATOR_MANIFEST_URL:-https://pdfulator.app/manifest}"
 
 # Private bun, used only if the system hasn't got one.
 BUN_HOME="$PDFULATOR_HOME/bun"
@@ -181,6 +188,62 @@ hash_file() {
 }
 
 
+# Versions
+#
+# The tarball carries a VERSION file: a tag like "v2.0.0" from CI, or whatever
+# `git describe` produced for a local `make dist`. Anything else -- an install
+# predating the stamp, or a file we can't read -- is "unknown", which --update
+# treats as "older than everything", since offering an update is the useful
+# thing to do when we can't tell.
+installed_version() {
+	if [ -s "$VERSION_FILE" ]; then
+		head -1 "$VERSION_FILE" | tr -d ' \t\r'
+	else
+		echo unknown
+	fi
+}
+
+# A local build: `git describe` output rather than a plain tag. Updating one of
+# these would silently discard whatever was being worked on, so --update stops
+# unless told otherwise.
+is_dev_version() {
+	case $1 in
+		unknown)             return 0 ;;
+		*-dirty)             return 0 ;;
+		# v2.0.0-3-gabc1234: a tag plus commits since. A bare tag has exactly
+		# two dots and no hyphen.
+		*-*)                 return 0 ;;
+		v[0-9]*|[0-9]*)      return 1 ;;
+		*)                   return 0 ;;
+	esac
+}
+
+# Compare two dotted versions. Prints -1, 0 or 1 for a<b, a==b, a>b.
+#
+# Hand-rolled because `sort -V` doesn't exist on BSD sort, so it isn't available
+# on macOS -- and this has to work everywhere the installer does. Leading "v" is
+# stripped; non-numeric components compare as 0, which is the right answer for
+# the pre-release suffixes we might grow later (v2.1.0-rc1 == v2.1.0 here, and a
+# tie means "no update", which is the safe direction).
+version_cmp() {  # version_cmp <a> <b>
+	a=${1#v}; b=${2#v}
+	while [ -n "$a" ] || [ -n "$b" ]; do
+		ah=${a%%.*}; bh=${b%%.*}
+		case $a in *.*) a=${a#*.} ;; *) a="" ;; esac
+		case $b in *.*) b=${b#*.} ;; *) b="" ;; esac
+
+		# Trim any -suffix, then anything non-numeric becomes 0.
+		ah=${ah%%-*}; bh=${bh%%-*}
+		case $ah in ''|*[!0-9]*) ah=0 ;; esac
+		case $bh in ''|*[!0-9]*) bh=0 ;; esac
+
+		if [ "$ah" -lt "$bh" ]; then echo -1; return 0; fi
+		if [ "$ah" -gt "$bh" ]; then echo 1;  return 0; fi
+	done
+	echo 0
+}
+
+
 # The application must be where install.sh put it. If someone has copied this
 # script somewhere without the rest, say so plainly rather than failing later
 # with a confusing error from bun.
@@ -218,8 +281,11 @@ quote() { printf '%s' "$1" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/"; }
 args=""            # pass-through arguments, shell-quoted
 browser=""         # --browser value, if given
 want_runtime=0     # --install-runtime seen
-command=""         # a wrapper subcommand: uninstall | setup-status
+command=""         # a wrapper subcommand: uninstall | setup-status | update | ...
 expect=""          # non-empty while consuming a flag's value
+update_check=0     # --check: report only, exit status says whether one exists
+update_yes=0       # --yes: don't prompt
+update_force=0     # --force: update over a dev build
 
 for arg in "$@"; do
 	# Value of a wrapper flag we saw last time round.
@@ -235,13 +301,19 @@ for arg in "$@"; do
 	case $arg in
 		# Wrapper subcommands. Mutually exclusive; last one wins is not a
 		# useful behaviour, so refuse rather than guess.
-		--uninstall|--setup-status|--install)
+		--uninstall|--setup-status|--install|--update|--version)
 			if [ -n "$command" ]; then
 				echo "pdfulator: $arg and --$command can't be combined" >&2
 				exit 1
 			fi
 			command=${arg#--}
 			;;
+
+		# Modifiers for --update. Only meaningful there, and checked below, so
+		# that `pdfulator --check` alone is an error rather than a no-op.
+		--check)            update_check=1 ;;
+		--yes|-y)           update_yes=1 ;;
+		--force)            update_force=1 ;;
 
 		--install-runtime)  want_runtime=1 ;;
 
@@ -261,6 +333,14 @@ if [ -n "$expect" ]; then
 		browser)     echo "pdfulator: --browser needs auto, find, install, or a path" >&2 ;;
 		passthrough) echo "pdfulator: --theme needs a name or path" >&2 ;;
 	esac
+	exit 1
+fi
+
+# --check/--yes/--force only mean something to --update. Silently ignoring them
+# elsewhere would make `pdfulator --yes doc.md` look like it did something.
+if [ "$command" != update ] &&
+   [ $((update_check + update_yes + update_force)) -gt 0 ]; then
+	echo "pdfulator: --check, --yes and --force only apply to --update" >&2
 	exit 1
 fi
 
@@ -304,6 +384,20 @@ ask() {  # ask <prompt> <default>; answer in $REPLY_VALUE
 }
 
 if [ "$command" = "install" ]; then
+	# install.sh calls this at the end of every install, including the reinstall
+	# that --update performs. When both choices survived that, there is nothing
+	# to ask, and prompting again (or printing "now run --install") would be
+	# noise. Typing `pdfulator --install` directly still always asks, because
+	# changing your mind later is the reason it stays available.
+	if [ "${PDFULATOR_POST_INSTALL:-0}" = 1 ] &&
+	   [ -s "$RUNTIME_CONF" ] && [ -s "$BROWSER_CONF" ]; then
+		echo "" >&2
+		echo "Runtime: $(cat "$RUNTIME_CONF")" >&2
+		echo "Browser: $(cat "$BROWSER_CONF")" >&2
+		echo "" >&2
+		exit 0
+	fi
+
 	open_tty
 	if [ "$TTY_OK" != 1 ]; then
 		# No terminal: say what to run rather than guessing or half-configuring.
@@ -406,6 +500,157 @@ if [ "$command" = "install" ]; then
 fi
 
 
+# Version
+
+if [ "$command" = "version" ]; then
+	echo "pdfulator $(installed_version)"
+	exit 0
+fi
+
+
+# Update
+#
+# Deliberately not a reimplementation of install.sh: that script already knows
+# how to download, verify a checksum, stage and swap while preserving the user's
+# themes, browser and runtime pin. --update finds out what version exists, asks,
+# and then re-runs it. The copy inside $PDFULATOR_HOME is preferred (it arrived
+# checksum-verified with the rest of the tarball); older installs predate that,
+# so there's a fetch fallback.
+#
+# Sits above the runtime gate: updating must work on an installation that has
+# never had a runtime chosen -- that may be exactly why someone is updating.
+
+if [ "$command" = "update" ]; then
+	current=$(installed_version)
+
+	fetch_stdout() {
+		if command -v curl >/dev/null 2>&1; then
+			curl -fsSL "$1"
+		elif command -v wget >/dev/null 2>&1; then
+			wget -qO- "$1"
+		else
+			echo "pdfulator: need curl or wget to check for updates." >&2
+			return 1
+		fi
+	}
+
+	manifest=$(fetch_stdout "$PDFULATOR_MANIFEST_URL") || {
+		echo "pdfulator: couldn't fetch the release list from $PDFULATOR_MANIFEST_URL" >&2
+		exit 1
+	}
+
+	# One release per line: version<TAB>tarball<TAB>sha256, newest first,
+	# with #-comments. Take the first non-comment line as the latest.
+	latest=$(printf '%s\n' "$manifest" |
+		sed -e 's/#.*//' -e '/^[[:space:]]*$/d' |
+		head -1 | cut -f1)
+
+	[ -n "$latest" ] || {
+		echo "pdfulator: the release list is empty or unreadable." >&2
+		exit 1
+	}
+
+	echo "Installed: $current" >&2
+	echo "Latest:    $latest" >&2
+
+	# An explicit PDFULATOR_VERSION means the user has already decided which
+	# release they want -- pin or downgrade -- so skip the comparison entirely.
+	if [ -n "${PDFULATOR_VERSION:-}" ] && [ "$PDFULATOR_VERSION" != latest ]; then
+		target=$PDFULATOR_VERSION
+		echo "Requested: $target  (PDFULATOR_VERSION)" >&2
+	else
+		target=$latest
+		if [ "$(version_cmp "$current" "$latest")" != -1 ]; then
+			# Not behind the latest release. For a dev build that's not really
+			# a statement about being current -- `git describe` versions aren't
+			# comparable to tags -- so say what it is rather than "up to date".
+			echo "" >&2
+			if is_dev_version "$current"; then
+				echo "This is a local build ($current), not a release." >&2
+				echo "Use --force to replace it with $latest." >&2
+			else
+				echo "pdfulator is up to date." >&2
+			fi
+			# --check is for scripts: exit 0 means "an update is available", so
+			# having nothing to offer is the non-zero case.
+			if [ "$update_check" = 1 ]; then exit 1; fi
+			if [ "$update_force" != 1 ]; then exit 0; fi
+		fi
+	fi
+
+	if [ "$update_check" = 1 ]; then
+		echo "" >&2
+		echo "Update available: $current -> $target" >&2
+		exit 0
+	fi
+
+	# A `git describe` build that is merely *behind* the latest release reaches
+	# here without having passed the check above. Replacing it would discard
+	# uncommitted work, so it needs the same explicit consent -- either --force,
+	# or a PDFULATOR_VERSION that names what the user wants.
+	#
+	# "unknown" is exempt: it means an install predating the VERSION file, not a
+	# working tree, and updating it is exactly the right move.
+	if [ "$current" != unknown ] && is_dev_version "$current" &&
+	   [ "$update_force" != 1 ] && [ -z "${PDFULATOR_VERSION:-}" ]; then
+		echo "" >&2
+		echo "pdfulator: $current is a local build; refusing to overwrite it." >&2
+		echo "Use --force to replace it with $target." >&2
+		exit 1
+	fi
+
+	if [ "$update_yes" != 1 ]; then
+		open_tty
+		if [ "$TTY_OK" != 1 ]; then
+			echo "" >&2
+			echo "Not a terminal, so nothing has been changed. To update:" >&2
+			echo "  pdfulator --update --yes" >&2
+			exit 1
+		fi
+		echo "" >&3
+		ask "Update to $target? [y/N]: " n
+		exec 3>&-
+		case $REPLY_VALUE in
+			y|Y|yes|YES) ;;
+			*) echo "Nothing changed." >&2; exit 0 ;;
+		esac
+	fi
+
+	# Prefer the installer that came with this install; fall back to the
+	# published one for installs predating it being shipped in the tarball.
+	installer="$PDFULATOR_HOME/install.sh"
+	tmp_installer=""
+	if [ ! -f "$installer" ]; then
+		echo "  fetching the installer" >&2
+		tmp_installer=$(mktemp) || exit 1
+		trap 'rm -f "$tmp_installer"' EXIT INT TERM
+		fetch_stdout "https://pdfulator.app/install.sh" > "$tmp_installer" || {
+			echo "pdfulator: couldn't fetch the installer." >&2
+			exit 1
+		}
+		installer=$tmp_installer
+	fi
+
+	# install.sh preserves the browser, runtime, themes and (lockfile
+	# permitting) node_modules, so there is nothing to save here. It re-runs
+	# `--install` at the end, which is a no-op when both pins already exist.
+	#
+	# `sh "$installer"` rather than executing it: the copy unpacked from the
+	# tarball may not have kept its executable bit through every tar
+	# implementation, and this way it doesn't matter.
+	PDFULATOR_HOME="$PDFULATOR_HOME" \
+	PDFULATOR_BIN="$PDFULATOR_BIN" \
+	PDFULATOR_VERSION="$target" \
+	PDFULATOR_RELEASE_BASE="${PDFULATOR_RELEASE_BASE:-}" \
+		sh "$installer" || {
+			echo "pdfulator: update failed; the existing installation is unchanged." >&2
+			exit 1
+		}
+
+	exit 0
+fi
+
+
 # Setup status
 #
 # What still needs deciding, in the user's own terms. install.sh calls this
@@ -456,8 +701,6 @@ if [ "$command" = "uninstall" ]; then
 
 	echo "Uninstalling pdfulator from $PDFULATOR_HOME..." >&2
 
-	kept=0
-
 	# Walk the manifest and delete only files whose contents still match what
 	# we shipped. Anything edited is left in place, and its absence from the
 	# delete list is what later keeps its parent directory alive.
@@ -474,7 +717,6 @@ if [ "$command" = "uninstall" ]; then
 				rm -f "$target"
 			else
 				echo "  keeping modified $rel" >&2
-				kept=$((kept + 1))
 			fi
 		done < "$MANIFEST"
 	fi
@@ -483,34 +725,50 @@ if [ "$command" = "uninstall" ]; then
 	# chromium/ and bun/ are things we downloaded, so all three go
 	# unconditionally. A system-wide bun is untouched -- we only ever wrote here.
 	rm -rf "$PDFULATOR_HOME/node_modules" "$PDFULATOR_HOME/chromium" "$BUN_HOME"
-	rm -f "$STAMP" "$MANIFEST" "$BROWSER_CONF"
+	rm -f "$STAMP" "$MANIFEST" "$BROWSER_CONF" "$RUNTIME_CONF"
 
 	# Prune directories that are now empty. -depth so children are considered
 	# before parents; a dir holding a kept or user-added file simply fails
 	# rmdir and survives, which is exactly the intent.
 	find "$PDFULATOR_HOME" -depth -mindepth 1 -type d -exec rmdir {} + 2>/dev/null || true
 
-	# Remove the installed copy of this script, but never the one being run --
-	# that could be a build tree or a download the user still wants.
+	# Remove the installed command. install.sh put it there, so it's ours to
+	# take away -- including when it's the copy currently running, which is the
+	# usual case (`pdfulator --uninstall` off the PATH). Deleting a running
+	# script is safe on Unix: the shell has already read it.
+	#
+	# A copy running from anywhere else -- a checkout, a build tree -- is not
+	# ours and is left alone.
 	installed_bin="$PDFULATOR_BIN/pdfulator"
 	self=$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")
-	if [ -f "$installed_bin" ] && [ "$installed_bin" != "$self" ]; then
+	if [ -f "$installed_bin" ]; then
 		rm -f "$installed_bin"
 		echo "  removed $installed_bin" >&2
 	fi
 
-	if rmdir "$PDFULATOR_HOME" 2>/dev/null; then
+	# Anything left that we didn't ship and the user didn't modify -- a stale
+	# pin from an older version, an editor's backup file. It isn't content, so
+	# it shouldn't keep the directory alive, but it isn't ours to delete
+	# silently either: count it so the message below is true.
+	remaining=$(find "$PDFULATOR_HOME" -mindepth 1 ! -type d 2>/dev/null | wc -l | tr -d ' ')
+
+	if [ "$remaining" = 0 ]; then
+		# Empty but for directories that survived the prune above (they can't
+		# have, since prune removes empty ones -- but be explicit rather than
+		# relying on that).
+		rm -rf "$PDFULATOR_HOME"
 		echo "Removed $PDFULATOR_HOME" >&2
 	else
 		echo "" >&2
-		echo "Kept $PDFULATOR_HOME ($kept modified/added file(s) remain)." >&2
+		echo "Kept $PDFULATOR_HOME ($remaining file(s) remain)." >&2
 		echo "Remove it yourself with:  rm -rf \"$PDFULATOR_HOME\"" >&2
 	fi
 
-	if [ "$installed_bin" = "$self" ]; then
+	# Only worth saying when the script being run isn't the installed one --
+	# that copy has just been deleted, so there's nothing left to advise.
+	if [ -f "$self" ] && [ "$self" != "$installed_bin" ]; then
 		echo "" >&2
-		echo "This script is the installed copy; remove it with:" >&2
-		echo "  rm \"$self\"" >&2
+		echo "(this script, $self, is not part of the installation and was left alone)" >&2
 	fi
 
 	exit 0
@@ -666,6 +924,10 @@ case " $* " in
 		echo "      --browser install     download a private browser (~96MB)" >&2
 		echo "      --browser <path>      use this browser (remembered)" >&2
 		echo "      --install-runtime     download bun if it isn't installed" >&2
+		echo "      --update              install a newer release, if there is one" >&2
+		echo "      --update --check      exit 0 if an update is available" >&2
+		echo "      --update --yes        update without asking" >&2
+		echo "      --version             report the installed version" >&2
 		echo "      --uninstall           remove pdfulator (keeps your themes)" >&2
 		exit 0
 		;;

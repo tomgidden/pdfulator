@@ -14,6 +14,7 @@
 #   PDFULATOR_VERSION  a release tag, or "latest" (default)
 #   PDFULATOR_REPO     owner/repo to fetch from
 #   PDFULATOR_TARBALL  install this local file instead of downloading
+#   PDFULATOR_RELEASE_BASE  release URL root, if not GitHub's
 #
 # Options (also accepted when piped: `... | sh -s -- --install-runtime`):
 #   --install-runtime   also download a private bun, if none is installed
@@ -50,7 +51,10 @@ for arg in "$@"; do
 			exit 1
 			;;
 		-h|--help)
-			sed -n '2,22p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'
+			# Everything from line 2 to the end of the header block, so
+			# editing the header can't silently truncate the help.
+			sed -n '2,/^[^#]/p' "$0" 2>/dev/null |
+				sed -e '/^[^#]/d' -e 's/^# \{0,1\}//'
 			exit 0
 			;;
 		*)
@@ -111,10 +115,17 @@ if [ -n "${PDFULATOR_TARBALL:-}" ]; then
 	echo "  using $PDFULATOR_TARBALL" >&2
 	cp "$PDFULATOR_TARBALL" "$tmp/pdfulator.tar.gz"
 else
+	# PDFULATOR_RELEASE_BASE exists so the download can be pointed at a mirror
+	# or a local server -- which is also how the update path is tested without
+	# cutting real releases.
+	release_base=${PDFULATOR_RELEASE_BASE:-}
+	[ -n "$release_base" ] ||
+		release_base="https://github.com/$PDFULATOR_REPO/releases"
+
 	if [ "$PDFULATOR_VERSION" = latest ]; then
-		url_base="https://github.com/$PDFULATOR_REPO/releases/latest/download"
+		url_base="$release_base/latest/download"
 	else
-		url_base="https://github.com/$PDFULATOR_REPO/releases/download/$PDFULATOR_VERSION"
+		url_base="$release_base/download/$PDFULATOR_VERSION"
 	fi
 
 	tarball_url="$url_base/pdfulator.tar.gz"
@@ -165,8 +176,12 @@ if [ -d "$PDFULATOR_HOME" ]; then
 	echo "  updating existing installation" >&2
 	[ -d "$PDFULATOR_HOME/themes" ] && cp -R "$PDFULATOR_HOME/themes" "$staging/" 2>/dev/null || true
 
-	# Downloads are expensive; carry them over rather than re-fetching.
-	keeps="bun chromium .browser"
+	# Downloads are expensive; carry them over rather than re-fetching. The
+	# pins go too: an update that silently reverted the user's runtime or
+	# browser choice would look like the update broke something.
+	#
+	# VERSION is deliberately absent -- the incoming one is the whole point.
+	keeps="bun chromium .browser .runtime"
 
 	# node_modules only if the dependencies haven't changed. The wrapper
 	# installs them when the directory is absent, so carrying a stale tree
@@ -197,7 +212,7 @@ mv "$staging" "$PDFULATOR_HOME"
 (
 	cd "$PDFULATOR_HOME"
 	find . -type f \
-		! -name .manifest ! -name .installed ! -name .browser \
+		! -name .manifest ! -name .installed ! -name .browser ! -name .runtime \
 		! -path './node_modules/*' ! -path './bun/*' ! -path './chromium/*' \
 		! -path './themes/*' |
 		sed 's|^\./||' |
@@ -230,7 +245,13 @@ touch "$STAMP"
 # These are the wrapper's jobs; the installer only relays the request. Run
 # through the installed copy so PDFULATOR_HOME resolves the same way it will
 # from now on.
-run_wrapper() { PDFULATOR_HOME="$PDFULATOR_HOME" PDFULATOR_BIN="$PDFULATOR_BIN" "$wrapper" "$@"; }
+# PDFULATOR_POST_INSTALL tells the wrapper this is the automatic call at the end
+# of an install, not the user asking to reconfigure -- so it can stay quiet when
+# everything is already settled, which is the normal case after an update.
+run_wrapper() {
+	PDFULATOR_HOME="$PDFULATOR_HOME" PDFULATOR_BIN="$PDFULATOR_BIN" \
+	PDFULATOR_POST_INSTALL=1 "$wrapper" "$@"
+}
 
 [ "$want_runtime" = 1 ] && run_wrapper --install-runtime
 [ "$want_browser" = 1 ] && run_wrapper --browser install

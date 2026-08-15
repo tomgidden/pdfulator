@@ -168,11 +168,35 @@ The bundled wrapper adds a few of its own:
 | `-b`, `--browser auto\|find\|install\|<path>` | Choose the rendering browser (remembered) |
 | `--install-runtime` | Download a private copy of _bun_ if none is installed |
 | `--setup-status` | Report what is still needed |
+| `--update` | Install a newer release, if there is one |
+| `--version` | Report the installed version |
 | `--uninstall` | Remove pdfulator, keeping anything you added or edited |
 
 Nothing is downloaded or launched without you asking: pdfulator will explain
 what it needs and wait rather than picking a browser or fetching a runtime on
 your behalf.
+
+### Updating
+
+```sh
+pdfulator --update          # asks first
+pdfulator --update --yes    # doesn't
+pdfulator --update --check  # exits 0 if an update is available, 1 if not
+```
+
+An update keeps your themes, your chosen browser and runtime, and the private
+_bun_ or Chromium if you have one — only the application itself is replaced.
+Dependencies are reinstalled on next use if the release changed them.
+
+`PDFULATOR_VERSION` pins a particular release, which is also how to go back:
+
+```sh
+PDFULATOR_VERSION=v2.0.0 pdfulator --update --yes
+```
+
+A build made from a checkout (`make install-local`) is left alone rather than
+being replaced by a release, since that would discard whatever you were working
+on. `--force` overrides that.
 
 ### What it installs, and where
 
@@ -186,9 +210,10 @@ default), plus the wrapper itself in `$PDFULATOR_BIN` (`~/.local/bin`):
 | `bun/` | Private _bun_, only if you asked for one | ~60MB |
 | `chromium/` | `chrome-headless-shell`, only if you asked for one | ~193MB |
 
-`pdfulator --uninstall` removes all of it, except files you have added or
-modified — your themes and any edited stylesheets are kept, and it tells you
-what it left behind.
+`pdfulator --uninstall` removes all of it — including the `pdfulator` command
+itself — except files you have added or modified. Your themes and any edited
+stylesheets are kept, and it tells you what it left behind; if there's nothing
+to keep, the directory goes too.
 
 ## Customisation and development
 

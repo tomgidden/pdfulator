@@ -73,6 +73,15 @@ jobs:
               --json tagName,isDraft,isPrerelease \
               --jq '.[] | select(.isDraft == false) | .tagName' |
             while IFS= read -r tag; do
+              # Only releases that actually carry a tarball. Releases from
+              # before the bundled distribution existed (v1.x) have no assets,
+              # and listing one would send `--update` at a 404.
+              gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+                --json assets --jq '.assets[].name' 2>/dev/null |
+                grep -qx 'pdfulator.tar.gz' || {
+                  echo "  skipping $tag (no tarball)" >&2
+                  continue
+                }
               base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
               printf '%s\t%s/pdfulator.tar.gz\t%s/pdfulator.tar.gz.sha256\n' \
                 "$tag" "$base" "$base"
