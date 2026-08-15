@@ -78,7 +78,7 @@ docker run --rm --init -v $(pwd):/in pdfulator --watch
 Install with:
 
 ```bash
-curl -fsSL https://pdfulator.app/install.sh | sh
+curl -fsSL https://pdfulator.app/get | sh
 ```
 
 That downloads the current release into `~/.local/share/pdfulator` (override
@@ -86,19 +86,28 @@ with `PDFULATOR_HOME`) and puts a `pdfulator` command in `~/.local/bin`
 (`PDFULATOR_BIN`). The download is checksum-verified, and reinstalling over an
 existing copy keeps your themes.
 
-Nothing else is fetched without you asking. pdfulator runs on
-[bun](https://bun.sh) and renders with a Chromium-based browser; if either is
-missing it says so and waits. You can get them both up-front if you prefer:
+If it has a terminal to ask on, it then walks you through the two remaining
+choices — which JavaScript runtime to use, and which browser to render with —
+listing what it found on your machine and defaulting to the sensible answer.
+Run `pdfulator --install` any time to change your mind.
+
+Piped somewhere without a terminal (a Dockerfile, a provisioning script), it
+installs and tells you to run `pdfulator --install` when convenient, rather than
+guessing. Or answer up front:
 
 ```bash
-curl -fsSL https://pdfulator.app/install.sh | sh -s -- --install-runtime --install-browser
+curl -fsSL https://pdfulator.app/get | sh -s -- --install-runtime --install-browser
 ```
+
+Nothing is fetched without you asking. pdfulator runs on
+[bun](https://bun.sh) — it will use an existing node or deno if you have one,
+but bun is the only runtime it will download for you — and renders with a
+Chromium-based browser.
 
 It can use one of your existing Chromium-based browsers, and even try to locate
 them; or you can tell it to install a minimal browser
-(`chrome-headless-shell`) for its own use.
-
-On first run, you'll need:
+(`chrome-headless-shell`) for its own use. `pdfulator --install` asks, but you
+can also set it directly:
 
 ```bash
 pdfulator --browser XXX
@@ -111,9 +120,9 @@ where `XXX` is one of:
 - `install`: install a minimal browser inside the pdfulator install
 - a path to a browser executable.
 
-After that, it should remember your choice.
+Either way, it remembers your choice.
 
-If all goes well, you can just do:
+Then:
 
 - `pdfulator README.md` (generates `README.pdf`)
 - `pdfulator README.md foo.pdf` (generates `foo.pdf`)
@@ -155,8 +164,10 @@ The bundled wrapper adds a few of its own:
 
 | Option | Meaning |
 | --- | --- |
+| `--install` | Choose a runtime and browser, asking if there's a terminal |
 | `-b`, `--browser auto\|find\|install\|<path>` | Choose the rendering browser (remembered) |
 | `--install-runtime` | Download a private copy of _bun_ if none is installed |
+| `--setup-status` | Report what is still needed |
 | `--uninstall` | Remove pdfulator, keeping anything you added or edited |
 
 Nothing is downloaded or launched without you asking: pdfulator will explain

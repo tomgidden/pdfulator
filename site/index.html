@@ -1,0 +1,15 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>pdfulator</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1.5rem; }
+  pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; border-radius: 4px; }
+  code { font-family: ui-monospace, monospace; }
+</style>
+<h1>pdfulator</h1>
+<p>Markdown to PDF, with real page layout.</p>
+<pre><code>curl -fsSL https://pdfulator.app/get | sh</code></pre>
+<p>Or with <a href="https://hub.docker.com/r/tomgidden/pdfulator">Docker</a>:</p>
+<pre><code>docker run --rm --init -i tomgidden/pdfulator:2 - &lt; foo.md &gt; foo.pdf</code></pre>
+<p><a href="https://github.com/tomgidden/pdfulator">Source and documentation on GitHub</a></p>

@@ -1,7 +1,7 @@
 #!/bin/sh
 # pdfulator installer.
 #
-#   curl -fsSL https://pdfulator.app/install.sh | sh
+#   curl -fsSL https://pdfulator.app/get | sh
 #
 # Downloads the current release, unpacks it into $PDFULATOR_HOME, and puts the
 # `pdfulator` command on your PATH. Nothing else happens without being asked:
@@ -164,8 +164,26 @@ tar xzf "$tmp/pdfulator.tar.gz" -C "$staging"
 if [ -d "$PDFULATOR_HOME" ]; then
 	echo "  updating existing installation" >&2
 	[ -d "$PDFULATOR_HOME/themes" ] && cp -R "$PDFULATOR_HOME/themes" "$staging/" 2>/dev/null || true
+
 	# Downloads are expensive; carry them over rather than re-fetching.
-	for keep in bun chromium node_modules .browser; do
+	keeps="bun chromium .browser"
+
+	# node_modules only if the dependencies haven't changed. The wrapper
+	# installs them when the directory is absent, so carrying a stale tree
+	# across a version bump would leave pdfulator.js failing at import with
+	# nothing to suggest why.
+	old_lock=""
+	[ -f "$PDFULATOR_HOME/bun.lock" ] && old_lock=$(hash_file "$PDFULATOR_HOME/bun.lock")
+	new_lock=""
+	[ -f "$staging/bun.lock" ] && new_lock=$(hash_file "$staging/bun.lock")
+
+	if [ -n "$old_lock" ] && [ "$old_lock" = "$new_lock" ]; then
+		keeps="$keeps node_modules"
+	elif [ -d "$PDFULATOR_HOME/node_modules" ]; then
+		echo "  dependencies changed; they'll be reinstalled on first use" >&2
+	fi
+
+	for keep in $keeps; do
 		[ -e "$PDFULATOR_HOME/$keep" ] && mv "$PDFULATOR_HOME/$keep" "$staging/" 2>/dev/null || true
 	done
 	rm -rf "$PDFULATOR_HOME"
@@ -243,9 +261,10 @@ echo "  pdfulator dir/ [outdir/]           convert a directory" >&2
 echo "  pdfulator --help                   all options" >&2
 echo "" >&2
 
-# Let the wrapper say what it still needs -- it knows whether bun and a browser
-# are present, and it is the thing the user will be running from now on.
-run_wrapper --setup-status >&2 || true
+# Hand over to the wrapper to settle the runtime and browser. It prompts when
+# there's a terminal to prompt on, and otherwise just says what to run next --
+# it knows what's already present, and it's what the user runs from now on.
+run_wrapper --install >&2 || true
 
 echo "Uninstall with:  pdfulator --uninstall" >&2
 echo "" >&2

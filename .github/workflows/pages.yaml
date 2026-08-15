@@ -1,0 +1,105 @@
+name: pages
+
+# The site is built here rather than committed to a branch, so that CI can
+# publish things it computes -- the version manifest especially -- without
+# anyone having to remember to commit them.
+#
+# Two triggers, because the site has two kinds of content:
+#   * docs and the installer, which track the v2 branch
+#   * the manifest of releases, which changes when a release is published
+on:
+  push:
+    branches:
+      - "v2"
+    paths:
+      - "install.sh"
+      - "README.md"
+      - "site/**"
+      - ".github/workflows/pages.yaml"
+
+  # Note: a `release: published` trigger would NOT work here. The release is
+  # created by the dist job using GITHUB_TOKEN, and GitHub suppresses workflow
+  # triggers from token-created events to prevent recursion -- so the manifest
+  # would silently never refresh. The dist job calls this workflow directly
+  # instead, via workflow_dispatch.
+  workflow_dispatch:
+
+# One deployment at a time; a queued run supersedes a waiting one rather than
+# racing it. Don't cancel in-progress: a half-deployed site is worse than a
+# slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+
+          # Nothing here needs building, and Jekyll would otherwise skip files
+          # whose names it doesn't like.
+          touch _site/.nojekyll
+
+          # The installer, at an extensionless path so the one-liner reads
+          # cleanly, plus a conventional name for anyone who prefers it.
+          # Pages serves /get as application/octet-stream and /install.sh as
+          # application/x-sh; curl ignores both, so either pipes to sh fine.
+          cp install.sh _site/get
+          cp install.sh _site/install.sh
+
+          cp -r site/. _site/ 2>/dev/null || true
+
+      # A manifest of every published release, so `pdfulator --update` can find
+      # out what exists without needing a GitHub API token or a JSON parser in
+      # /bin/sh. One release per line: version, then the asset URL.
+      - name: Build the release manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "# pdfulator releases -- version<TAB>tarball<TAB>sha256"
+            echo "# newest first; generated $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+              --json tagName,isDraft,isPrerelease \
+              --jq '.[] | select(.isDraft == false) | .tagName' |
+            while IFS= read -r tag; do
+              base="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag"
+              printf '%s\t%s/pdfulator.tar.gz\t%s/pdfulator.tar.gz.sha256\n' \
+                "$tag" "$base" "$base"
+            done
+          } > _site/manifest
+
+          echo "--- manifest ---"
+          cat _site/manifest
+
+      - name: Upload
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
