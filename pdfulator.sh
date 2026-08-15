@@ -1,9 +1,15 @@
 #!/bin/sh
-# pdfulator self-extracting bundle
+# pdfulator — command wrapper.
 #
-# First run unpacks the embedded archive into $PDFULATOR_HOME, installs deps,
-# and copies this script to $PDFULATOR_BIN. Later runs exec straight through.
-# `--uninstall` reverses it, keeping anything the user added or edited.
+# Installed by install.sh as $PDFULATOR_BIN/pdfulator, alongside the
+# application in $PDFULATOR_HOME. This script owns everything that outlives
+# installation: finding or fetching bun, choosing the rendering browser, and
+# uninstalling. Nothing heavyweight happens without being asked for.
+#
+#   --browser auto|find|install|<path>   choose a browser (remembered)
+#   --install-runtime                    download bun if none is installed
+#   --setup-status                       report what is still needed
+#   --uninstall                          remove pdfulator, keeping your edits
 set -e
 
 PDFULATOR_HOME="${PDFULATOR_HOME:-$HOME/.local/share/pdfulator}"
@@ -20,9 +26,6 @@ BUN_PRIVATE="$BUN_HOME/bin/bun"
 # Oldest bun we'll accept from the system. Below this we install our own rather
 # than fail obscurely somewhere inside pdfulator.js.
 BUN_MIN_MAJOR=1
-
-# base64 decode: `-d` is GNU/modern-BSD, `-D` the older macOS spelling.
-decode_base64() { base64 -d 2>/dev/null || base64 -D; }
 
 # Locate a usable bun, preferring one we installed (known-good) over the
 # system's. Prints the path, or nothing if there isn't one.
@@ -71,8 +74,11 @@ install_bun() {
 		}
 	done
 
+	# The installer's own closing advice ("add this to your PATH") is wrong for
+	# us -- this bun is private and pdfulator calls it by absolute path -- so
+	# keep its chatter out of the way unless it fails or --verbose is on.
 	mkdir -p "$BUN_HOME"
-	if $fetch | env BUN_INSTALL="$BUN_HOME" SHELL=/pdfulator/no-shell bash >&2; then
+	if $fetch | env BUN_INSTALL="$BUN_HOME" SHELL=/pdfulator/no-shell bash >/dev/null 2>"$BUN_HOME/.install.log"; then
 		[ -x "$BUN_PRIVATE" ] || {
 			echo "pdfulator: bun installer finished but no binary at $BUN_PRIVATE." >&2
 			return 1
@@ -82,6 +88,7 @@ install_bun() {
 	fi
 
 	echo "pdfulator: bun download failed." >&2
+	[ -s "$BUN_HOME/.install.log" ] && tail -5 "$BUN_HOME/.install.log" >&2
 	return 1
 }
 
@@ -113,8 +120,22 @@ hash_file() {
 }
 
 
+# The application must be where install.sh put it. If someone has copied this
+# script somewhere without the rest, say so plainly rather than failing later
+# with a confusing error from bun.
+if [ ! -f "$PDFULATOR_HOME/pdfulator.js" ]; then
+	echo "pdfulator: no installation found at $PDFULATOR_HOME" >&2
+	echo "" >&2
+	echo "Install it with:" >&2
+	echo "  curl -fsSL https://pdfulator.app/install.sh | sh" >&2
+	echo "" >&2
+	echo "or set PDFULATOR_HOME if it lives somewhere else." >&2
+	exit 1
+fi
+
+
 # --install-runtime is consent to download bun. Pull it out of the arguments
-# early: it applies to the install below, long before the main parsing.
+# early: it applies before any of the main parsing.
 want_runtime=0
 for a in "$@"; do
 	[ "$a" = "--install-runtime" ] && want_runtime=1
@@ -129,9 +150,49 @@ if [ "$want_runtime" = 1 ]; then
 fi
 
 
+# Setup status
+#
+# What still needs deciding, in the user's own terms. install.sh calls this
+# after unpacking so the "what now" advice comes from the thing that actually
+# knows, rather than being duplicated in the installer.
+
+if [ "${1:-}" = "--setup-status" ]; then
+	need=0
+
+	if find_bun >/dev/null 2>&1; then
+		:
+	else
+		echo "bun is not installed. pdfulator runs on it:" >&2
+		echo "  pdfulator --install-runtime            download a private copy (~60MB)" >&2
+		echo "  or install it yourself: https://bun.sh" >&2
+		echo "" >&2
+		need=1
+	fi
+
+	if [ -s "$BROWSER_CONF" ]; then
+		echo "Rendering browser: $(cat "$BROWSER_CONF")" >&2
+	else
+		echo "No rendering browser chosen yet. Pick one, once:" >&2
+		echo "  pdfulator --browser auto               use the best one found here" >&2
+		echo "  pdfulator --browser find               list what's available" >&2
+		echo "  pdfulator --browser install            download a private copy (~96MB)" >&2
+		echo "" >&2
+		need=1
+	fi
+
+	# Not a decision the user has to make -- just something that will happen on
+	# the first conversion, so it isn't a surprise when it does.
+	[ -d "$PDFULATOR_HOME/node_modules" ] ||
+		echo "Dependencies will be installed on first use." >&2
+
+	[ "$need" = 0 ] && echo "Ready to convert." >&2
+	exit 0
+fi
+
+
 # Uninstall
 
-if [ "$1" = "--uninstall" ]; then
+if [ "${1:-}" = "--uninstall" ]; then
 	if [ ! -f "$STAMP" ]; then
 		echo "pdfulator is not installed at $PDFULATOR_HOME" >&2
 		exit 1
@@ -200,105 +261,9 @@ if [ "$1" = "--uninstall" ]; then
 fi
 
 
-# First-run install
 
-if [ ! -f "$STAMP" ]; then
-	# Unpacking is cheap and harmless; obtaining a runtime is neither, so settle
-	# the runtime question before writing anything.
-	BUN=$(find_bun) || {
-		if [ "$want_runtime" = 1 ]; then
-			install_bun || exit 1
-			BUN=$BUN_PRIVATE
-		else
-			bun_needed_message
-			exit 1
-		fi
-	}
-
-	echo "Installing pdfulator to $PDFULATOR_HOME..." >&2
-	mkdir -p "$PDFULATOR_HOME"
-
-	# Skip past this stub to the base64 payload.
-	skip=$(awk '/^__ARCHIVE_BELOW__$/ { print NR + 1; exit }' "$0")
-	tail -n +"$skip" "$0" | decode_base64 | tar xzf - -C "$PDFULATOR_HOME"
-
-	# Record what we shipped, before bun install adds node_modules, so
-	# --uninstall can later distinguish our files from the user's.
-	(
-		cd "$PDFULATOR_HOME"
-		find . -type f ! -name .manifest ! -name .installed |
-			sed 's|^\./||' |
-			while IFS= read -r rel; do
-				printf '%s  %s\n' "$(hash_file "$rel")" "$rel"
-			done
-	) > "$MANIFEST"
-
-	(cd "$PDFULATOR_HOME" && "$BUN" install --frozen-lockfile) >&2
-
-	# Put ourselves on PATH so `pdfulator` works from anywhere. We copy rather
-	# than move: $0 may be a build artefact or a download the user still wants.
-	self=$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")
-	installed_bin="$PDFULATOR_BIN/pdfulator"
-	installed_self=0
-	if [ "$self" != "$installed_bin" ]; then
-		mkdir -p "$PDFULATOR_BIN"
-		if cp "$self" "$installed_bin" 2>/dev/null; then
-			chmod +x "$installed_bin"
-			installed_self=1
-		else
-			echo "  (could not install to $installed_bin)" >&2
-		fi
-	fi
-
-	touch "$STAMP"
-
-	# First-run orientation. Everything goes to stderr so that piping stdout
-	# (pdfulator - > out.pdf) stays clean.
-	echo "" >&2
-	echo "pdfulator installed." >&2
-	echo "  application:  $PDFULATOR_HOME" >&2
-	[ "$installed_self" = 1 ] && echo "  command:      $installed_bin" >&2
-
-	# Only nag about PATH if it actually needs fixing.
-	if [ "$installed_self" = 1 ]; then
-		case ":$PATH:" in
-			*":$PDFULATOR_BIN:"*) ;;
-			*)
-				echo "" >&2
-				echo "$PDFULATOR_BIN is not on your PATH. Add it with:" >&2
-				echo "  export PATH=\"\$PATH:$PDFULATOR_BIN\"" >&2
-				;;
-		esac
-	fi
-
-	echo "" >&2
-	echo "Usage:" >&2
-	echo "  pdfulator input.md output.pdf     convert a file" >&2
-	echo "  pdfulator .                       convert every *.md here" >&2
-	echo "  pdfulator --watch .               rebuild on change" >&2
-	echo "  pdfulator --help                  all options" >&2
-	echo "" >&2
-	echo "Before converting, choose a browser to render with (once):" >&2
-	echo "  pdfulator --browser auto               use the best one found here" >&2
-	echo "  pdfulator --browser find               list what's available" >&2
-	echo "  pdfulator --browser install            download a private copy (~96MB)" >&2
-	echo "" >&2
-	echo "Themes live in $PDFULATOR_HOME/themes/<name>/ and are kept on uninstall." >&2
-	echo "Uninstall with:  pdfulator --uninstall" >&2
-
-	if [ "$installed_self" = 1 ]; then
-		echo "" >&2
-		echo "This bundle has been copied to $installed_bin; you can now:" >&2
-		echo "  rm \"$self\"" >&2
-	fi
-	echo "" >&2
-
-	# A bare first run is an install, not a conversion: nothing to do next.
-	[ $# -eq 0 ] && exit 0
-fi
-
-# Runtime, on an already-installed copy. bun can disappear after install (a
-# system upgrade, an uninstalled package manager), so re-check every run.
+# Runtime. bun can disappear after install (a system upgrade, an uninstalled
+# package manager), so re-check every run rather than trusting a stamp.
 if [ -z "${BUN:-}" ]; then
 	BUN=$(find_bun) || {
 		if [ "$want_runtime" = 1 ]; then
@@ -308,6 +273,17 @@ if [ -z "${BUN:-}" ]; then
 			bun_needed_message
 			exit 1
 		fi
+	}
+fi
+
+# npm dependencies. install.sh deliberately doesn't run this -- node_modules is
+# platform-specific and needs a bun, which may only have arrived just now. It's
+# cheap to check and only ever runs once.
+if [ ! -d "$PDFULATOR_HOME/node_modules" ]; then
+	echo "Installing dependencies..." >&2
+	(cd "$PDFULATOR_HOME" && "$BUN" install --frozen-lockfile) >&2 || {
+		echo "pdfulator: dependency installation failed." >&2
+		exit 1
 	}
 fi
 

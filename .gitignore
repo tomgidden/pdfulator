@@ -14,5 +14,7 @@
 !README.pdf
 
 node_modules/
-pdfulator
+pdfulator.tar.gz
+pdfulator.tar.gz.sha256
+.dist/
 
