@@ -75,10 +75,28 @@ docker run --rm --init -v $(pwd):/in pdfulator --watch
 
 ### Bundled
 
-Wrapper scripts are used to install the script and dependencies to
-`~/.local/share/pdfulator`, or somewhere else you choose. It can use one of your
-existing Chromium-based browsers, and even try to locate them; or you can tell
-it to install a minimal browser (`chrome-headless-shell`) for its own use.
+Install with:
+
+```bash
+curl -fsSL https://pdfulator.app/install.sh | sh
+```
+
+That downloads the current release into `~/.local/share/pdfulator` (override
+with `PDFULATOR_HOME`) and puts a `pdfulator` command in `~/.local/bin`
+(`PDFULATOR_BIN`). The download is checksum-verified, and reinstalling over an
+existing copy keeps your themes.
+
+Nothing else is fetched without you asking. pdfulator runs on
+[bun](https://bun.sh) and renders with a Chromium-based browser; if either is
+missing it says so and waits. You can get them both up-front if you prefer:
+
+```bash
+curl -fsSL https://pdfulator.app/install.sh | sh -s -- --install-runtime --install-browser
+```
+
+It can use one of your existing Chromium-based browsers, and even try to locate
+them; or you can tell it to install a minimal browser
+(`chrome-headless-shell`) for its own use.
 
 On first run, you'll need:
 
@@ -182,8 +200,8 @@ bun run pdfulator.js --watch .
 To build the distributable wrapper from a checkout:
 
 ```zsh
-make bundle           # produces ./pdfulator
-make install-bundle   # ...and copies it to ~/.local/bin
+make dist             # produces ./pdfulator.tar.gz, what CI publishes
+make install-local    # ...and installs it, exactly as install.sh would
 ```
 
 ## Styling

@@ -55,30 +55,48 @@ release:
 		--platform linux/arm64,linux/amd64 \
 		--tag $(TAG) .
 
-# Self-extracting bundle
+# Distribution tarball
 #
-# The only install route: a single 'pdfulator' script with assets embedded as
-# base64, which unpacks itself to $PDFULATOR_HOME on first run. (Docker aside,
-# this is how pdfulator is meant to be installed -- there is deliberately no
-# "copy pdfulator.js into ~/.local/bin" mode, since the script needs its
-# node_modules and defaults alongside it.)
+# What CI publishes and install.sh downloads: the application, the wrapper
+# (named `pdfulator`, since that's what it becomes once installed), and the
+# lockfile that lets the target machine run `bun install --frozen-lockfile`.
+# Deliberately no node_modules -- those are platform-specific and installed
+# on arrival.
 
-BUNDLE_NAME  = pdfulator
-BUNDLE_FILES = pdfulator.js package.json bun.lock \
-               $(shell find defaults theme -type f)
+DIST      = pdfulator.tar.gz
+DIST_TOP  = pdfulator.js package.json bun.lock defaults theme
+# Expanded for dependency tracking only; the copy uses DIST_TOP so that
+# directories arrive as directories rather than a flattened heap of files.
+DIST_SRC  = pdfulator.js package.json bun.lock \
+            $(shell find defaults theme -type f)
 
-bundle: $(BUNDLE_NAME)
+dist: $(DIST)
 
-install-bundle: bundle
-	mkdir -p $(PREFIX)/bin
-	install -m 755 $(BUNDLE_NAME) $(PREFIX)/bin/
-	@echo "Installed to $(PREFIX)/bin/$(BUNDLE_NAME)"
+$(DIST): pdfulator.sh $(DIST_SRC)
+	@rm -rf .dist && mkdir -p .dist
+	@cp -R $(DIST_TOP) .dist/
+	@cp pdfulator.sh .dist/pdfulator
+	@chmod +x .dist/pdfulator
+	tar czf $@ -C .dist .
+	@rm -rf .dist
+	@echo "$(DIST) written ($$(wc -c < $(DIST) | tr -d ' ') bytes)"
 
-$(BUNDLE_NAME): make-bundle.sh pdfulator.sh $(BUNDLE_FILES)
-	./make-bundle.sh $@
+# The checksum install.sh verifies against.
+$(DIST).sha256: $(DIST)
+	@(command -v sha256sum >/dev/null && sha256sum $(DIST) || shasum -a 256 $(DIST)) > $@
+	@cat $@
+
+# Install straight from a checkout, without going through a release. Goes via
+# install.sh so a local install is identical to a downloaded one -- manifest
+# and all, which is what makes --uninstall work afterwards.
+install-local: $(DIST) $(DIST).sha256
+	PDFULATOR_TARBALL=$(abspath $(DIST)) ./install.sh
 
 bun.lock: package.json
 	bun install
 
-.PHONY: all watch docker-watch build release bundle install-bundle
+clean:
+	rm -rf .dist $(DIST) $(DIST).sha256
+
+.PHONY: all watch docker-watch build release dist install-local clean
 

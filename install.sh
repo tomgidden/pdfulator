@@ -1,0 +1,251 @@
+#!/bin/sh
+# pdfulator installer.
+#
+#   curl -fsSL https://pdfulator.app/install.sh | sh
+#
+# Downloads the current release, unpacks it into $PDFULATOR_HOME, and puts the
+# `pdfulator` command on your PATH. Nothing else happens without being asked:
+# the runtime and the rendering browser are the wrapper's business, and it will
+# explain what it needs the first time you run it.
+#
+# Environment:
+#   PDFULATOR_HOME     where the application lives (~/.local/share/pdfulator)
+#   PDFULATOR_BIN      where the command goes     (~/.local/bin)
+#   PDFULATOR_VERSION  a release tag, or "latest" (default)
+#   PDFULATOR_REPO     owner/repo to fetch from
+#   PDFULATOR_TARBALL  install this local file instead of downloading
+#
+# Options (also accepted when piped: `... | sh -s -- --install-runtime`):
+#   --install-runtime   also download a private bun, if none is installed
+#   --install-browser   also download a private headless browser
+#   --uninstall         hand over to the installed wrapper's --uninstall
+set -eu
+
+PDFULATOR_HOME="${PDFULATOR_HOME:-$HOME/.local/share/pdfulator}"
+PDFULATOR_BIN="${PDFULATOR_BIN:-$HOME/.local/bin}"
+PDFULATOR_VERSION="${PDFULATOR_VERSION:-latest}"
+PDFULATOR_REPO="${PDFULATOR_REPO:-tomgidden/pdfulator}"
+
+MANIFEST="$PDFULATOR_HOME/.manifest"
+STAMP="$PDFULATOR_HOME/.installed"
+
+want_runtime=0
+want_browser=0
+
+for arg in "$@"; do
+	case $arg in
+		--install-runtime) want_runtime=1 ;;
+		--install-browser) want_browser=1 ;;
+		--uninstall)
+			# The wrapper owns uninstallation -- it has the manifest logic and
+			# knows what it downloaded. Support it here so a user who no longer
+			# has the command on PATH can still get out via the one-liner.
+			if [ -x "$PDFULATOR_BIN/pdfulator" ]; then
+				exec "$PDFULATOR_BIN/pdfulator" --uninstall
+			elif [ -x "$PDFULATOR_HOME/pdfulator" ]; then
+				exec "$PDFULATOR_HOME/pdfulator" --uninstall
+			fi
+			echo "pdfulator does not appear to be installed." >&2
+			echo "Looked in $PDFULATOR_BIN and $PDFULATOR_HOME." >&2
+			exit 1
+			;;
+		-h|--help)
+			sed -n '2,22p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'
+			exit 0
+			;;
+		*)
+			echo "install.sh: unknown option: $arg" >&2
+			exit 1
+			;;
+	esac
+done
+
+
+# Prerequisites
+
+fetch_to() {  # fetch_to <url> <dest>
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$1" -o "$2"
+	else
+		wget -qO "$2" "$1"
+	fi
+}
+
+fetch_stdout() {
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$1"
+	else
+		wget -qO- "$1"
+	fi
+}
+
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || {
+	echo "pdfulator: need curl or wget to download." >&2
+	exit 1
+}
+command -v tar >/dev/null 2>&1 || { echo "pdfulator: need tar." >&2; exit 1; }
+
+hash_file() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	else
+		shasum -a 256 "$1" | cut -d' ' -f1
+	fi
+}
+
+
+# Work out what to download
+
+echo "Installing pdfulator to $PDFULATOR_HOME..." >&2
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+if [ -n "${PDFULATOR_TARBALL:-}" ]; then
+	# Local file (a checkout's `make install-local`). Nothing came off the
+	# network, so there is nothing to verify against.
+	[ -f "$PDFULATOR_TARBALL" ] || {
+		echo "pdfulator: no such file: $PDFULATOR_TARBALL" >&2
+		exit 1
+	}
+	echo "  using $PDFULATOR_TARBALL" >&2
+	cp "$PDFULATOR_TARBALL" "$tmp/pdfulator.tar.gz"
+else
+	if [ "$PDFULATOR_VERSION" = latest ]; then
+		url_base="https://github.com/$PDFULATOR_REPO/releases/latest/download"
+	else
+		url_base="https://github.com/$PDFULATOR_REPO/releases/download/$PDFULATOR_VERSION"
+	fi
+
+	tarball_url="$url_base/pdfulator.tar.gz"
+	checksum_url="$url_base/pdfulator.tar.gz.sha256"
+
+	echo "  fetching $tarball_url" >&2
+	fetch_to "$tarball_url" "$tmp/pdfulator.tar.gz" || {
+		echo "pdfulator: download failed." >&2
+		echo "Check the release exists: https://github.com/$PDFULATOR_REPO/releases" >&2
+		exit 1
+	}
+
+	# Verify against the published checksum. A missing checksum file is fatal
+	# rather than skippable: silently installing an unverified tarball from the
+	# network is exactly what this check exists to prevent.
+	echo "  verifying checksum" >&2
+	if ! fetch_stdout "$checksum_url" > "$tmp/expected.sha256" 2>/dev/null; then
+		echo "pdfulator: no checksum published for this release; refusing to continue." >&2
+		exit 1
+	fi
+
+	expected=$(cut -d' ' -f1 < "$tmp/expected.sha256")
+	actual=$(hash_file "$tmp/pdfulator.tar.gz")
+	if [ "$expected" != "$actual" ]; then
+		echo "pdfulator: checksum mismatch -- refusing to install." >&2
+		echo "  expected $expected" >&2
+		echo "  actual   $actual" >&2
+		exit 1
+	fi
+fi
+
+
+# Unpack
+
+# Unpack to one side, then swap into place, so an interrupted download can't
+# leave a half-installed tree that looks complete.
+staging="$tmp/root"
+mkdir -p "$staging"
+tar xzf "$tmp/pdfulator.tar.gz" -C "$staging"
+
+[ -f "$staging/pdfulator.js" ] || {
+	echo "pdfulator: the archive doesn't look right (no pdfulator.js)." >&2
+	exit 1
+}
+
+# Preserve anything the user added -- themes especially -- across a reinstall.
+if [ -d "$PDFULATOR_HOME" ]; then
+	echo "  updating existing installation" >&2
+	[ -d "$PDFULATOR_HOME/themes" ] && cp -R "$PDFULATOR_HOME/themes" "$staging/" 2>/dev/null || true
+	# Downloads are expensive; carry them over rather than re-fetching.
+	for keep in bun chromium node_modules .browser; do
+		[ -e "$PDFULATOR_HOME/$keep" ] && mv "$PDFULATOR_HOME/$keep" "$staging/" 2>/dev/null || true
+	done
+	rm -rf "$PDFULATOR_HOME"
+fi
+
+mkdir -p "$(dirname "$PDFULATOR_HOME")"
+mv "$staging" "$PDFULATOR_HOME"
+
+# Record what we shipped, before anything generates node_modules, so the
+# wrapper's --uninstall can tell our files from the user's later.
+(
+	cd "$PDFULATOR_HOME"
+	find . -type f \
+		! -name .manifest ! -name .installed ! -name .browser \
+		! -path './node_modules/*' ! -path './bun/*' ! -path './chromium/*' \
+		! -path './themes/*' |
+		sed 's|^\./||' |
+		while IFS= read -r rel; do
+			printf '%s  %s\n' "$(hash_file "$rel")" "$rel"
+		done
+) > "$MANIFEST"
+
+
+# Put the command on PATH
+
+wrapper="$PDFULATOR_HOME/pdfulator"
+[ -f "$wrapper" ] || { echo "pdfulator: the archive has no wrapper script." >&2; exit 1; }
+chmod +x "$wrapper"
+
+mkdir -p "$PDFULATOR_BIN"
+installed_bin="$PDFULATOR_BIN/pdfulator"
+if cp "$wrapper" "$installed_bin" 2>/dev/null; then
+	chmod +x "$installed_bin"
+else
+	installed_bin=""
+	echo "  (could not write to $PDFULATOR_BIN)" >&2
+fi
+
+touch "$STAMP"
+
+
+# Hand over to the wrapper for anything that needs consent
+
+# These are the wrapper's jobs; the installer only relays the request. Run
+# through the installed copy so PDFULATOR_HOME resolves the same way it will
+# from now on.
+run_wrapper() { PDFULATOR_HOME="$PDFULATOR_HOME" PDFULATOR_BIN="$PDFULATOR_BIN" "$wrapper" "$@"; }
+
+[ "$want_runtime" = 1 ] && run_wrapper --install-runtime
+[ "$want_browser" = 1 ] && run_wrapper --browser install
+
+
+# What now
+
+echo "" >&2
+echo "pdfulator installed." >&2
+echo "  application:  $PDFULATOR_HOME" >&2
+[ -n "$installed_bin" ] && echo "  command:      $installed_bin" >&2
+
+if [ -n "$installed_bin" ]; then
+	case ":${PATH:-}:" in
+		*":$PDFULATOR_BIN:"*) ;;
+		*)
+			echo "" >&2
+			echo "$PDFULATOR_BIN is not on your PATH. Add it with:" >&2
+			echo "  export PATH=\"\$PATH:$PDFULATOR_BIN\"" >&2
+			;;
+	esac
+fi
+
+echo "" >&2
+echo "Usage:" >&2
+echo "  pdfulator input.md [output.pdf]    convert a file" >&2
+echo "  pdfulator dir/ [outdir/]           convert a directory" >&2
+echo "  pdfulator --help                   all options" >&2
+echo "" >&2
+
+# Let the wrapper say what it still needs -- it knows whether bun and a browser
+# are present, and it is the thing the user will be running from now on.
+run_wrapper --setup-status >&2 || true
+
+echo "Uninstall with:  pdfulator --uninstall" >&2
+echo "" >&2
