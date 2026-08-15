@@ -70,16 +70,36 @@ DIST_TOP  = pdfulator.js package.json bun.lock defaults theme
 DIST_SRC  = pdfulator.js package.json bun.lock \
             $(shell find defaults theme -type f)
 
+# What `pdfulator --version` reports and `--update` compares against. CI
+# overrides this with the tag being built (VERSION=$(github.ref_name)); a local
+# build gets `git describe`, whose -dirty suffix is what stops --update from
+# offering to overwrite a work-in-progress with a release.
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+
+# The version isn't a file, so make can't see it change: building v2.0.0 and
+# then v2.1.0 from an unchanged tree would otherwise silently republish the
+# first one. .version records what the existing tarball was stamped with; if
+# that no longer matches, the tarball is stale by definition, so drop it before
+# make evaluates the rule below. (Rewriting .version as a prerequisite of $(DIST)
+# doesn't work: make stats it before the recipe runs.)
+$(shell [ -f .version ] && [ "$$(cat .version)" = "$(VERSION)" ] || \
+        rm -f $(DIST) $(DIST).sha256)
+
 dist: $(DIST)
 
-$(DIST): pdfulator.sh $(DIST_SRC)
+# install.sh ships inside the tarball as well as beside it: --update re-runs it
+# rather than reimplementing download, verify, stage and swap.
+$(DIST): pdfulator.sh install.sh $(DIST_SRC)
 	@rm -rf .dist && mkdir -p .dist
 	@cp -R $(DIST_TOP) .dist/
 	@cp pdfulator.sh .dist/pdfulator
-	@chmod +x .dist/pdfulator
+	@cp install.sh .dist/install.sh
+	@chmod +x .dist/pdfulator .dist/install.sh
+	@echo "$(VERSION)" > .dist/VERSION
 	tar czf $@ -C .dist .
 	@rm -rf .dist
-	@echo "$(DIST) written ($$(wc -c < $(DIST) | tr -d ' ') bytes)"
+	@echo "$(VERSION)" > .version
+	@echo "$(DIST) written, version $(VERSION) ($$(wc -c < $(DIST) | tr -d ' ') bytes)"
 
 # The checksum install.sh verifies against.
 $(DIST).sha256: $(DIST)
@@ -100,9 +120,12 @@ bun.lock: package.json
 test: $(DIST)
 	bash tests/argmatrix.sh
 	bash tests/wrapmatrix.sh
+	bash tests/uninstallmatrix.sh
+	bash tests/updatematrix.sh
+	@$(MAKE) -s dist >/dev/null   # updatematrix leaves a versioned tarball behind
 
 clean:
-	rm -rf .dist $(DIST) $(DIST).sha256
+	rm -rf .dist .version $(DIST) $(DIST).sha256
 
 .PHONY: all watch docker-watch build release dist install-local test clean
 

@@ -277,6 +277,10 @@ jobs:
       contents: write
       attestations: write
       id-token: write
+      # For the `gh workflow run pages.yaml` call at the end: dispatching a
+      # workflow is an Actions write, and without it the step 403s *after* the
+      # release has already been published -- leaving /manifest stale.
+      actions: write
 
     steps:
       - name: Checkout
@@ -290,8 +294,12 @@ jobs:
       - name: Verify lockfile is current
         run: bun install --frozen-lockfile
 
+      # VERSION goes into the tarball, and is what `--update` compares against.
+      # It must be the tag, not `git describe`: a checkout at a tag would
+      # otherwise be indistinguishable from a developer's working tree, and
+      # --update refuses to overwrite those.
       - name: Build tarball
-        run: make dist pdfulator.tar.gz.sha256
+        run: make dist pdfulator.tar.gz.sha256 VERSION="${{ github.ref_name }}"
 
       # A smoke test worth having: install.sh is the thing every user runs
       # first, and a broken one is invisible until someone tries it.
@@ -315,6 +323,17 @@ jobs:
           # Must be a real PDF, not an empty file or an error page.
           head -c 5 "$RUNNER_TEMP/out.pdf" | grep -q '%PDF-'
 
+      # The update matrix builds its own releases and serves them locally, so it
+      # exercises the whole download/verify/swap path without needing this tag
+      # to be published first.
+      - name: Test the update path
+        run: bash tests/updatematrix.sh
+
+      # updatematrix rebuilds the tarball at its own test versions; restore the
+      # one that gets attested and published.
+      - name: Rebuild the release tarball
+        run: make dist pdfulator.tar.gz.sha256 VERSION="${{ github.ref_name }}"
+
       - name: Attest the tarball
         uses: actions/attest-build-provenance@v4
         with:
@@ -333,7 +352,63 @@ jobs:
       # to be an explicit call: the release was created with GITHUB_TOKEN, and
       # GitHub suppresses workflow triggers from token-created events, so a
       # `release: published` trigger in pages.yaml would never fire.
+      # Refresh /manifest so `pdfulator --update` can see the release we just
+      # published. This has to be an explicit dispatch: the release was created
+      # with GITHUB_TOKEN, and GitHub suppresses workflow triggers from
+      # token-created events, so a `release: published` trigger never fires.
+      #
+      # Not fatal, deliberately -- the release is already out by now, and
+      # failing here would mark a good release as broken over a manifest that
+      # can be rebuilt by hand. But "not fatal" must not mean "silent": the
+      # step verifies the dispatch actually took effect and writes the outcome
+      # to the job summary, so a permissions regression is visible on the run
+      # page instead of only in a timestamp nobody thinks to check.
       - name: Rebuild the site
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yaml --repo "$GITHUB_REPOSITORY" --ref v2
+        run: |
+          before=$(curl -fsSL https://pdfulator.app/manifest 2>/dev/null |
+                   sed -n 's/^# newest first; generated //p')
+
+          if ! gh workflow run pages.yaml --repo "$GITHUB_REPOSITORY" --ref v2; then
+            {
+              echo "### ⚠️ Site rebuild could not be dispatched"
+              echo ""
+              echo "The release published fine, but \`/manifest\` was not refreshed,"
+              echo "so \`pdfulator --update\` will not offer **${GITHUB_REF_NAME}** yet."
+              echo ""
+              echo "Fix: re-run the \`pages\` workflow manually, and check the"
+              echo "\`dist\` job still has \`actions: write\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # Dispatch accepted != manifest rebuilt. Poll for the generated
+          # timestamp to move, so a pages.yaml that fails on its own terms is
+          # reported here rather than looking like success.
+          for _ in $(seq 1 30); do
+            sleep 10
+            after=$(curl -fsSL https://pdfulator.app/manifest 2>/dev/null |
+                    sed -n 's/^# newest first; generated //p')
+            if [ -n "$after" ] && [ "$after" != "$before" ]; then
+              if curl -fsSL https://pdfulator.app/manifest |
+                 grep -q "^${GITHUB_REF_NAME}$(printf '\t')"; then
+                echo "### ✅ /manifest refreshed, listing ${GITHUB_REF_NAME}" \
+                  >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              echo "### ⚠️ /manifest rebuilt but does not list ${GITHUB_REF_NAME}" \
+                >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+          done
+
+          {
+            echo "### ⚠️ /manifest did not refresh within 5 minutes"
+            echo ""
+            echo "The dispatch was accepted, so check the \`pages\` workflow."
+            echo "\`pdfulator --update\` will not offer **${GITHUB_REF_NAME}**"
+            echo "until \`/manifest\` lists it."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

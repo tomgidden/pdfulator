@@ -18,3 +18,4 @@ pdfulator.tar.gz
 pdfulator.tar.gz.sha256
 .dist/
 
+.version
