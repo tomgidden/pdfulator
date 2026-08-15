@@ -100,6 +100,7 @@ If all goes well, you can just do:
 - `pdfulator README.md` (generates `README.pdf`)
 - `pdfulator README.md foo.pdf` (generates `foo.pdf`)
 - `pdfulator .` (converts every `*.md` in the current folder)
+- `pdfulator docs/ pdfs/` (converts `docs/*.md` into `pdfs/`, creating it if needed)
 - `pdfulator - < foo.md > foo.pdf` or `cat foo.md | pdfulator - > foo.pdf`
 
 and you can uninstall with `pdfulator --uninstall`
@@ -107,11 +108,22 @@ and you can uninstall with `pdfulator --uninstall`
 ## Options
 
 ```
-pdfulator [options] input.md [output.pdf]
-pdfulator [options] -                      stdin → stdout
-pdfulator [options] dir/                   convert all *.md in a directory
-pdfulator --watch [options] dir/           rebuild on change
+pdfulator [options] input.md [output.pdf]   convert one file
+pdfulator [options] dir/ [outdir/]          convert every *.md in a directory
+pdfulator [options] -                       stdin → stdout
+pdfulator --watch [options] dir/ [outdir/]  rebuild on change
 ```
+
+There are two shapes, each taking an optional destination: a file becomes a
+file, and a directory becomes a directory. Whether the destination is a file or
+a directory follows from the source, so nothing changes meaning depending on
+what happens to be on disk — `pdfulator *.md` is not a supported form precisely
+because its meaning would depend on how many files the glob matched. Use a
+directory to convert many files at once.
+
+A destination is only overwritten if it is genuinely a PDF (checked by content,
+not by name) or doesn't exist yet. An output that is already newer than its
+source is left alone, and says so.
 
 | Option | Meaning |
 | --- | --- |
@@ -309,7 +321,7 @@ If there is a file `logo.svg` in the `theme` folder, it will be used in the top-
 
 [ ] _HTML_, _EPUB_, etc. The pipeline already produces HTML on the way to PDF, so exposing it should be straightforward. I'm just an old fart that likes neat A4 documents even if I never actually print them out.
 
-[ ] _Multiple files on the command line_. `pdfulator a.md b.md` currently converts only the first; use `pdfulator .` for a whole folder in the meantime.
+[X] _Multiple files_. Handled by the directory form (`pdfulator src/ out/`) rather than a list of filenames, so an argument's meaning never depends on how many files a glob matched.
 
 [ ] Testing of `--watch` and improvement on file globbing and so on.
 

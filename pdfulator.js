@@ -81,10 +81,10 @@ function showHelp() {
 pdfulator — Markdown to PDF converter
 
 Usage:
-  pdfulator [options] input.md [output.pdf]
+  pdfulator [options] input.md [output.pdf]  convert one file
+  pdfulator [options] dir/ [outdir/]         convert every *.md in a directory
   pdfulator [options] -                      stdin → stdout
-  pdfulator [options] dir/                   convert all *.md in directory
-  pdfulator --watch [options] dir/           watch mode
+  pdfulator --watch [options] dir/ [outdir/] watch mode
 
 Options:
   -t, --theme <name|path>   theme to use
@@ -848,12 +848,16 @@ async function processFile(inputPath, outputPath, opts, themeDir, chromiumPath) 
   // Skip non-markdown
   if (!/\.(md|markdown)$/i.test(inputPath)) return;
 
-  // Skip if output is up to date
+  // Skip if the output is genuinely up to date. A zero-length file doesn't
+  // count -- that's the residue of an interrupted run, and treating it as
+  // current means the command silently does nothing.
   if (!opts.debug && fs.existsSync(outputPath)) {
     const inStat = fs.statSync(inputPath);
     const outStat = fs.statSync(outputPath);
-    if (inStat.mtimeMs < outStat.mtimeMs) {
-      if (opts.verbose) console.error(`Skipping ${inputPath} (unchanged)`);
+    if (outStat.size > 0 && inStat.mtimeMs < outStat.mtimeMs) {
+      // Worth saying out loud: an explicitly named file that isn't rebuilt
+      // looks like a failure otherwise.
+      console.error(`${path.basename(outputPath)} is up to date`);
       return;
     }
   }
@@ -903,6 +907,51 @@ async function processStdin(opts, themeDir, chromiumPath) {
   } finally {
     if (!opts.debug) fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+
+// Argument classification
+//
+// Extensions are a hint, not proof: what matters for "may I write here?" is
+// what the file actually is. Both helpers are cheap -- a stat and, at most,
+// the first five bytes.
+
+// 'missing' | 'pdf' | 'dir' | 'other'
+function classifyPath(p) {
+  const resolved = path.resolve(p);
+
+  let st;
+  try {
+    st = fs.statSync(resolved);
+  } catch {
+    return 'missing';
+  }
+
+  if (st.isDirectory()) return 'dir';
+  if (!st.isFile()) return 'other';
+  if (st.size === 0) return 'missing';   // a touched placeholder is fair game
+
+  let fd;
+  try {
+    fd = fs.openSync(resolved, 'r');
+    const buf = Buffer.alloc(5);
+    const n = fs.readSync(fd, buf, 0, 5, 0);
+    return n === 5 && buf.toString('latin1') === '%PDF-' ? 'pdf' : 'other';
+  } catch {
+    return 'other';
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// An input we can convert: an existing file that isn't already a PDF. The
+// extension decides only when the file is absent, so a missing `foo.md` still
+// reports "no such file" rather than "unrecognised".
+function isMarkdownInput(p) {
+  const kind = classifyPath(p);
+  if (kind === 'pdf' || kind === 'dir') return false;
+  if (kind === 'other') return true;                     // exists, not a PDF
+  return /\.(md|markdown)$/i.test(p);                    // missing: go by name
 }
 
 
@@ -959,9 +1008,84 @@ async function main() {
     opts.inputs.push(process.cwd());
   }
 
+  // Work out what the positional arguments mean before doing anything.
+  //
+  // Two symmetric shapes, each taking an optional destination. Which one
+  // applies is decided by the *source*, so no argument's meaning depends on
+  // guesswork:
+  //
+  //   pdfulator in.md              -- write in.pdf beside it
+  //   pdfulator in.md out.pdf      -- write out.pdf
+  //   pdfulator dir/               -- write each PDF beside its source
+  //   pdfulator dir/ outdir/       -- write them into outdir/
+  //
+  // Earlier versions accepted any number of inputs and guessed per-argument
+  // whether each was a source or a destination. That made `pdfulator *.md`
+  // change meaning with the number of files the glob matched. A directory is
+  // now how you convert many files at once.
+  const positional = opts.inputs;
+
+  if (positional.length > 2) {
+    console.error(`\
+Error: too many arguments.
+
+  pdfulator in.md [out.pdf]    convert one file
+  pdfulator dir/ [outdir/]     convert every .md in a directory
+
+To convert several named files, put them in a directory and convert that,
+or run pdfulator once per file.`);
+    process.exit(1);
+  }
+
+  const sourceIsDir = positional.length > 0 && classifyPath(positional[0]) === 'dir';
+
+  let explicitOutput = null;
+  if (positional.length === 2) {
+    const [source, dest] = positional;
+    const destKind = classifyPath(dest);
+
+    if (sourceIsDir) {
+      // dir -> dir. The destination may not exist yet; we create it. A
+      // trailing slash on either argument is just emphasis, already stripped
+      // by path.resolve.
+      if (destKind !== 'dir' && destKind !== 'missing') {
+        console.error(`\
+Error: ${source} is a directory, so ${dest} must be one too.
+
+  pdfulator ${source} outdir/`);
+        process.exit(1);
+      }
+      explicitOutput = path.resolve(dest);
+
+    } else {
+      // file -> file. The destination must be a PDF we may replace, or a name
+      // not yet taken. Judged by content, not extension: a file called .pdf
+      // holding something else is somebody's data.
+      if (destKind !== 'missing' && destKind !== 'pdf') {
+        console.error(`\
+Error: refusing to overwrite ${dest}.
+
+The second argument is the output file, so it must be a PDF or a new name.
+${destKind === 'dir'
+  ? `${dest} is a directory -- to convert into one, the source must be a directory too.`
+  : `${dest} exists and is not a PDF.`}`);
+        process.exit(1);
+      }
+      explicitOutput = path.resolve(dest);
+
+      // The source must not itself be a PDF -- almost always a swapped pair.
+      if (classifyPath(source) === 'pdf' || /\.pdf$/i.test(source)) {
+        console.error(`Error: ${source} is a PDF, not something to convert.`);
+        process.exit(1);
+      }
+    }
+
+    positional.length = 1;
+  }
+
   const tasks = [];
 
-  for (const input of opts.inputs) {
+  for (const input of positional) {
     const resolved = path.resolve(input);
 
     if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
@@ -969,9 +1093,18 @@ async function main() {
         .filter(f => /\.(md|markdown)$/i.test(f))
         .map(f => path.join(resolved, f));
 
+      // With a destination directory, mirror the names into it; otherwise
+      // each PDF lands beside its source.
+      const outDir = explicitOutput;
+      if (outDir) fs.mkdirSync(outDir, { recursive: true });
+
+      const outFor = f => {
+        const pdf = path.basename(f).replace(/\.(md|markdown)$/i, '.pdf');
+        return outDir ? path.join(outDir, pdf) : path.join(resolved, pdf);
+      };
+
       for (const f of files) {
-        const out = f.replace(/\.(md|markdown)$/i, '.pdf');
-        tasks.push(() => processFile(f, out, opts, themeDir, chromiumPath));
+        tasks.push(() => processFile(f, outFor(f), opts, themeDir, chromiumPath));
       }
 
       if (opts.watch) {
@@ -980,28 +1113,30 @@ async function main() {
         console.error(`Watching ${resolved} for changes...`);
         watchDir(resolved, async changedPath => {
           if (/\.(md|markdown)$/i.test(changedPath)) {
-            const out = changedPath.replace(/\.(md|markdown)$/i, '.pdf');
-            try { await processFile(changedPath, out, opts, themeDir, chromiumPath); }
+            try { await processFile(changedPath, outFor(changedPath), opts, themeDir, chromiumPath); }
             catch (e) { console.error(`Error processing ${changedPath}: ${e.message}`); }
           }
         });
         return; // keep process alive
       }
 
-    } else if (/\.(md|markdown)$/i.test(resolved)) {
-      // Explicit file: optional second positional arg is output path
-      const outArg = opts.inputs[opts.inputs.indexOf(input) + 1];
-      const out = (outArg && /\.pdf$/i.test(outArg))
-        ? path.resolve(outArg)
-        : resolved.replace(/\.(md|markdown)$/i, '.pdf');
+    } else if (classifyPath(resolved) === 'pdf' || /\.pdf$/i.test(resolved)) {
+      // A PDF as an input is always a mistake -- most likely a glob that
+      // caught the output of a previous run. The name alone is enough to
+      // refuse: a zero-length or truncated .pdf is still not source material,
+      // and converting it would overwrite it with itself.
+      console.error(`Error: ${input} is a PDF, not something to convert.`);
+      process.exit(1);
+
+    } else if (fs.existsSync(resolved)) {
+      const out = explicitOutput
+        || (/\.(md|markdown)$/i.test(resolved)
+          ? resolved.replace(/\.(md|markdown)$/i, '.pdf')
+          : `${resolved}.pdf`);
       tasks.push(() => processFile(resolved, out, opts, themeDir, chromiumPath));
 
-    } else if (/\.pdf$/i.test(resolved)) {
-      // This is an output path argument already consumed above — skip
-      continue;
-
     } else {
-      console.error(`Error: not found or unrecognised: ${input}`);
+      console.error(`Error: no such file: ${input}`);
       process.exit(1);
     }
   }
