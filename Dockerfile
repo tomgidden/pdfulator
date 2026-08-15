@@ -1,4 +1,4 @@
-FROM oven/bun:slim
+FROM oven/bun:1
 
 LABEL maintainer="tom@gidden.net"
 LABEL org.opencontainers.image.title="PDFulator"

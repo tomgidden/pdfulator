@@ -1,4 +1,4 @@
-TAG    = tomgidden/pdfulator
+TAG    = tomgidden/pdfulator:2
 PREFIX = $(HOME)/.local
 SHARE  = $(PREFIX)/share/pdfulator
 
@@ -52,72 +52,33 @@ build:
 
 release:
 	docker buildx build --push \
-		--platform linux/arm/v7,linux/arm64/v8,linux/amd64 \
+		--platform linux/arm64,linux/amd64 \
 		--tag $(TAG) .
 
-# Local install — extracts assets to ~/.local/share/pdfulator/
-
-install: install-deps install-assets install-bin
-
-install-deps:
-	bun install
-
-install-assets:
-	mkdir -p $(SHARE)/defaults $(SHARE)/themes
-	cp -r defaults/. $(SHARE)/defaults/
-	@echo "Assets installed to $(SHARE)/defaults/"
-	@echo "Place themes in $(SHARE)/themes/<theme-name>/"
-
-install-bin:
-	mkdir -p $(PREFIX)/bin
-	install -m 755 pdfulator.js $(PREFIX)/bin/pdfulator
-	@echo "Installed to $(PREFIX)/bin/pdfulator"
-
 # Self-extracting bundle
-# Creates a single 'pdfulator' shell script with assets embedded as base64.
-# Requires: bun install already run (node_modules present)
+#
+# The only install route: a single 'pdfulator' script with assets embedded as
+# base64, which unpacks itself to $PDFULATOR_HOME on first run. (Docker aside,
+# this is how pdfulator is meant to be installed -- there is deliberately no
+# "copy pdfulator.js into ~/.local/bin" mode, since the script needs its
+# node_modules and defaults alongside it.)
 
-BUNDLE_FILES = pdfulator.js defaults package.json
+BUNDLE_NAME  = pdfulator
+BUNDLE_FILES = pdfulator.js package.json bun.lock \
+               $(shell find defaults theme -type f)
 
-BUNDLE_NAME=pdfulator
-
-bundle: $(BUNDLE_NAME) $(BUNDLE_FILES)
+bundle: $(BUNDLE_NAME)
 
 install-bundle: bundle
-	cp $(BUNDLE_NAME) ~/.local/bin/
+	mkdir -p $(PREFIX)/bin
+	install -m 755 $(BUNDLE_NAME) $(PREFIX)/bin/
+	@echo "Installed to $(PREFIX)/bin/$(BUNDLE_NAME)"
 
-$(BUNDLE_NAME): bun.lock
-	@echo "Building self-extracting bundle..."
-	@TMPBUNDLE=$$(mktemp -d) && \
-	cp pdfulator.js $$TMPBUNDLE/ && \
-	cp package.json $$TMPBUNDLE/ && \
-	cp bun.lock $$TMPBUNDLE/ && \
-	cp -r defaults $$TMPBUNDLE/ && \
-	cp -r theme $$TMPBUNDLE/ && \
-	ARCHIVE=$$(cd $$TMPBUNDLE && tar czf - . | base64) && \
-	rm -rf $$TMPBUNDLE && \
-	{ printf '%s\n' \
-		'#!/bin/sh' \
-		'# pdfulator self-extracting bundle' \
-		'set -e' \
-		'PDFULATOR_HOME="$${PDFULATOR_HOME:-$$HOME/.local/share/pdfulator}"' \
-		'if [ ! -f "$$PDFULATOR_HOME/.installed" ]; then' \
-		'  echo "Installing pdfulator to $$PDFULATOR_HOME..." >&2' \
-		'  mkdir -p "$$PDFULATOR_HOME"' \
-		'  SKIP=$$(awk "/^__ARCHIVE_BELOW__$$/{print NR+1; exit}" "$$0")' \
-		'  tail -n +$$SKIP "$$0" | base64 -d | tar -xzf - -C "$$PDFULATOR_HOME"' \
-		'  (cd "$$PDFULATOR_HOME" && bun install --frozen-lockfile) >&2' \
-		'  touch "$$PDFULATOR_HOME/.installed"' \
-		'  echo "Done." >&2' \
-		'fi' \
-		'exec bun run "$$PDFULATOR_HOME/pdfulator.js" "$$@"' \
-		'__ARCHIVE_BELOW__'; \
-	printf '%s\n' "$$ARCHIVE"; } > $(BUNDLE_NAME) && \
-	chmod +x $(BUNDLE_NAME) && \
-	echo "Bundle written to $(BUNDLE_NAME) ($$(wc -c < $(BUNDLE_NAME)) bytes)"
+$(BUNDLE_NAME): make-bundle.sh pdfulator.sh $(BUNDLE_FILES)
+	./make-bundle.sh $@
 
 bun.lock: package.json
 	bun install
 
-.PHONY: all watch docker-watch build release install install-deps install-assets install-bin bundle
+.PHONY: all watch docker-watch build release bundle install-bundle
 
