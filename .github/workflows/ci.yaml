@@ -5,24 +5,20 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  workflow_dispatch:
+
   push:
     branches:
-      - "release"
-    #      - "master"
+      - "master"
+      - "v2"
     tags:
       - "v*"
     paths-ignore:
-      - ".github/workflows/*"
+      - "**.md"
 
   pull_request:
     paths-ignore:
-      - ".github/workflows/*"
-
-    # paths-ignore:
-    #   - '**.md'
-  # pull_request:
-  # paths-ignore:
-  #   - '**.md'
+      - "**.md"
 
 env:
   DOCKERHUB_SLUG: ${{ github.repository }}
@@ -35,7 +31,7 @@ jobs:
     if: github.event_name != 'pull_request'
     outputs:
       matrix: |
-        ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/arm/v8"]
+        ["linux/amd64", "linux/arm64"]
 
     steps:
       - name: Prepare
@@ -44,11 +40,11 @@ jobs:
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ env.DOCKERHUB_SLUG }}
@@ -61,12 +57,13 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha
       #      type=ref,event=branch
+
       - name: Rename meta bake definition file
         run: |
           mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
 
       - name: Upload meta bake definition
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: bake-meta
           path: /tmp/bake-meta.json
@@ -89,6 +86,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      attestations: write
+      id-token: write
 
     steps:
       - name: Prepare
@@ -97,25 +96,25 @@ jobs:
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download meta bake definition
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: bake-meta
           path: /tmp
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           buildkitd-flags: "--debug"
 
       - name: Login to DockerHub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -123,17 +122,20 @@ jobs:
 
       - name: Login to GHCR
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
-          logout: false
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         id: bake
-        uses: docker/bake-action@v5
+        uses: docker/bake-action@v7
         with:
+          # bake-action v7 defaults `source` to the remote git URL, which makes
+          # `files` resolve inside that context rather than the local checkout.
+          # The meta bake file lives on the runner, so pin source to the workspace.
+          source: .
           files: |
             .github/workflows/docker-bake.hcl
             /tmp/bake-meta.json
@@ -150,11 +152,11 @@ jobs:
       - name: Export digest
         run: |
           mkdir -p /tmp/digests
-          IMAGE_DIGEST="${{ fromJSON(steps.bake.outputs.metadata).image['containerimage.digest'] }}"
-          echo "${IMAGE_DIGEST#sha256:}" > "/tmp/digests/${IMAGE_DIGEST#sha256:}"
+          digest="${{ fromJSON(steps.bake.outputs.metadata).image['containerimage.digest'] }}"
+          touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: digests-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
@@ -170,37 +172,46 @@ jobs:
       - build
 
     permissions:
-      contents: write
+      contents: read
       packages: write
       attestations: write
       id-token: write
 
     steps:
       - name: Download meta bake definition
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: bake-meta
           path: /tmp
 
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: /tmp/digests
           pattern: digests-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Note, I'm still not sure what's meant to be happening here. This is my best guess.
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
-          logout: false
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both registry logins happen up-front, before any buildx work. The
+      # DockerHub push below copies blobs from DockerHub back into DockerHub,
+      # so the builder needs Hub credentials available from the start.
+      - name: Login to DockerHub
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Create manifest list and push (GHCR)
         working-directory: /tmp/digests
@@ -220,39 +231,100 @@ jobs:
             --format "{{json .Manifest}}" | jq -r '"GHCR_DIGEST=" + .digest' >> $GITHUB_ENV
 
       - name: Generate artifact attestation (GHCR)
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.GHCR_SLUG }}
           subject-digest: ${{ env.GHCR_DIGEST }}
           push-to-registry: true
-#
-#       - name: Login to DockerHub
-#         uses: docker/login-action@v3
-#         with:
-#           registry: index.docker.io
-#           username: ${{ secrets.DOCKERHUB_USERNAME }}
-#           password: ${{ secrets.DOCKERHUB_TOKEN }}
-#
-#       - name: Create manifest list and push (DockerHub)
-#         working-directory: /tmp/digests
-#         run: |
-#           docker buildx imagetools create \
-#               $(jq -cr \
-#                 '.target."docker-metadata-action".tags | map(select(startswith("${{ env.DOCKERHUB_SLUG }}")) | "-t " + .) | join(" ")' \
-#               /tmp/bake-meta.json) \
-#               $(printf '${{ env.DOCKERHUB_SLUG }}@sha256:%s ' *)
-#
-#       - name: Inspect image (DockerHub)
-#         id: inspect_dockerhub
-#         run: |
-#           TAG=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
-#           docker buildx imagetools inspect \
-#             ${{ env.DOCKERHUB_SLUG }}:${TAG} \
-#             --format "{{json .Manifest}}" | jq -r '"DOCKERHUB_DIGEST=" + .digest' >> $GITHUB_ENV
-#
-#       - name: Generate artifact attestation (DockerHub)
-#         uses: actions/attest-build-provenance@v1
-#         with:
-#           subject-name: ${{ env.DOCKERHUB_SLUG }}
-#           subject-digest: ${{ env.DOCKERHUB_DIGEST }}
-#           push-to-registry: true
+
+      - name: Create manifest list and push (DockerHub)
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+              $(jq -cr \
+                '.target."docker-metadata-action".tags | map(select(startswith("${{ env.DOCKERHUB_SLUG }}")) | "-t " + .) | join(" ")' \
+              /tmp/bake-meta.json) \
+              $(printf '${{ env.DOCKERHUB_SLUG }}@sha256:%s ' *)
+
+      - name: Inspect image (DockerHub)
+        id: inspect_dockerhub
+        run: |
+          TAG=$(jq -r '.target."docker-metadata-action".args.DOCKER_META_VERSION' /tmp/bake-meta.json)
+          docker buildx imagetools inspect \
+            ${{ env.DOCKERHUB_SLUG }}:${TAG} \
+            --format "{{json .Manifest}}" | jq -r '"DOCKERHUB_DIGEST=" + .digest' >> $GITHUB_ENV
+
+      - name: Generate artifact attestation (DockerHub)
+        uses: actions/attest-build-provenance@v4
+        with:
+          # Must be fully qualified: a bare `owner/repo` gives the action no
+          # registry host to match a credential against.
+          subject-name: docker.io/${{ env.DOCKERHUB_SLUG }}
+          subject-digest: ${{ env.DOCKERHUB_DIGEST }}
+          push-to-registry: true
+
+  # The bundled distribution: a tarball install.sh downloads and unpacks.
+  # Architecture-independent -- shell and JavaScript, with node_modules
+  # installed on the target machine -- so one build serves every platform.
+  dist:
+    runs-on: ubuntu-latest
+
+    # Tags only. A tarball is only useful once there's a release to attach it
+    # to, and `latest` must not drift to an untagged commit.
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+
+      # The lockfile ships inside the tarball, so it has to be the one we
+      # actually resolved -- a stale lockfile would break every install.
+      - name: Verify lockfile is current
+        run: bun install --frozen-lockfile
+
+      - name: Build tarball
+        run: make dist pdfulator.tar.gz.sha256
+
+      # A smoke test worth having: install.sh is the thing every user runs
+      # first, and a broken one is invisible until someone tries it.
+      - name: Install it, as a user would
+        run: |
+          PDFULATOR_HOME="$RUNNER_TEMP/pdf-home" \
+          PDFULATOR_BIN="$RUNNER_TEMP/pdf-bin" \
+          PDFULATOR_TARBALL="$PWD/pdfulator.tar.gz" \
+            ./install.sh
+          test -x "$RUNNER_TEMP/pdf-bin/pdfulator"
+          test -f "$RUNNER_TEMP/pdf-home/.manifest"
+
+      - name: Convert a document end to end
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq chromium
+          export PATH="$RUNNER_TEMP/pdf-bin:$PATH"
+          export PDFULATOR_HOME="$RUNNER_TEMP/pdf-home" PDFULATOR_BIN="$RUNNER_TEMP/pdf-bin"
+          pdfulator --browser /usr/bin/chromium
+          pdfulator README.md "$RUNNER_TEMP/out.pdf"
+          # Must be a real PDF, not an empty file or an error page.
+          head -c 5 "$RUNNER_TEMP/out.pdf" | grep -q '%PDF-'
+
+      - name: Attest the tarball
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: pdfulator.tar.gz
+
+      - name: Publish to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pdfulator.tar.gz
+            pdfulator.tar.gz.sha256
+            install.sh
+          fail_on_unmatched_files: true
