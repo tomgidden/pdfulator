@@ -53,7 +53,10 @@ run fail "needs a name or path"          t.md --theme
 run fail "needs auto, find, install"     t.md --browser
 
 echo "===== a theme literally named like a wrapper flag ====="
-run ok   ""                              --theme -b t.md
+# "-b" must reach pdfulator.js as the theme name -- not be eaten by the
+# wrapper's own -b. It then fails as a missing theme, which is the point:
+# the error names the theme, proving the value was passed through.
+run fail 'no theme named "-b"'           --theme -b t.md
 
 echo "===== combinations refused ====="
 run fail "can't be combined"             --uninstall --setup-status
