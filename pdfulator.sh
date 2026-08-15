@@ -6,6 +6,7 @@
 # installation: finding or fetching bun, choosing the rendering browser, and
 # uninstalling. Nothing heavyweight happens without being asked for.
 #
+#   --install                            choose a runtime and browser (asks)
 #   --browser auto|find|install|<path>   choose a browser (remembered)
 #   --install-runtime                    download bun if none is installed
 #   --setup-status                       report what is still needed
@@ -18,6 +19,7 @@ PDFULATOR_BIN="${PDFULATOR_BIN:-$HOME/.local/bin}"
 STAMP="$PDFULATOR_HOME/.installed"
 MANIFEST="$PDFULATOR_HOME/.manifest"
 BROWSER_CONF="$PDFULATOR_HOME/.browser"
+RUNTIME_CONF="$PDFULATOR_HOME/.runtime"
 
 # Private bun, used only if the system hasn't got one.
 BUN_HOME="$PDFULATOR_HOME/bun"
@@ -92,6 +94,65 @@ install_bun() {
 	return 1
 }
 
+# Every usable runtime on this machine, one "path<TAB>label" per line.
+#
+# bun is the one we manage: it's what the lockfile is for, and the only one we
+# will ever download. node and deno are listed because pdfulator.js is plain
+# JavaScript and runs on them unmodified -- if the user already has one, there
+# is no reason to make them install anything.
+list_runtimes() {
+	[ -x "$BUN_PRIVATE" ] &&
+		printf '%s\tbun %s (installed by pdfulator)\n' \
+			"$BUN_PRIVATE" "$("$BUN_PRIVATE" --version 2>/dev/null)"
+
+	for rt in bun node deno; do
+		p=$(command -v "$rt" 2>/dev/null) || continue
+		[ "$p" = "$BUN_PRIVATE" ] && continue
+		# deno reports "deno x.y.z ..."; bun and node report a bare version.
+		v=$("$p" --version 2>/dev/null | head -1 | sed "s/^$rt //")
+		printf '%s\t%s %s\n' "$p" "$rt" "$v"
+	done
+}
+
+# Run pdfulator.js under whichever runtime was chosen. `bun run` wants the
+# subcommand; node and deno take the script directly (deno additionally needs
+# to be told it may touch the filesystem, network and subprocesses -- it is the
+# only one of the three that sandboxes by default).
+run_js() {
+	case $(basename "$BUN") in
+		bun*)  exec_args="run $PDFULATOR_HOME/pdfulator.js" ;;
+		deno*) exec_args="run -A $PDFULATOR_HOME/pdfulator.js" ;;
+		*)     exec_args="$PDFULATOR_HOME/pdfulator.js" ;;
+	esac
+	# shellcheck disable=SC2086  # exec_args is ours, and deliberately split
+	if [ "${RUN_JS_EXEC:-0}" = 1 ]; then
+		PDFULATOR_HOME="$PDFULATOR_HOME" exec "$BUN" $exec_args "$@"
+	fi
+	PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" $exec_args "$@"
+}
+
+# Install the npm dependencies with whichever runtime is in $BUN.
+#
+# install.sh deliberately doesn't do this: node_modules is platform-specific and
+# needs a runtime, which may only have arrived moments ago. bun installs from
+# bun.lock; node and deno have no lockfile here, so they get npm's resolution of
+# the same package.json -- which is why bun is the runtime we manage.
+install_deps() {
+	case $(basename "$BUN") in
+		bun*)
+			(cd "$PDFULATOR_HOME" && "$BUN" install --frozen-lockfile)
+			;;
+		*)
+			command -v npm >/dev/null 2>&1 || {
+				echo "pdfulator: npm is needed to install dependencies for $(basename "$BUN")." >&2
+				echo "Run 'pdfulator --install' and choose bun instead." >&2
+				return 1
+			}
+			(cd "$PDFULATOR_HOME" && npm install --no-audit --no-fund)
+			;;
+	esac
+}
+
 # What to say when there's no bun and we haven't been told to fetch one.
 bun_needed_message() {
 	cat >&2 <<EOF
@@ -127,7 +188,7 @@ if [ ! -f "$PDFULATOR_HOME/pdfulator.js" ]; then
 	echo "pdfulator: no installation found at $PDFULATOR_HOME" >&2
 	echo "" >&2
 	echo "Install it with:" >&2
-	echo "  curl -fsSL https://pdfulator.app/install.sh | sh" >&2
+	echo "  curl -fsSL https://pdfulator.app/get | sh" >&2
 	echo "" >&2
 	echo "or set PDFULATOR_HOME if it lives somewhere else." >&2
 	exit 1
@@ -174,7 +235,7 @@ for arg in "$@"; do
 	case $arg in
 		# Wrapper subcommands. Mutually exclusive; last one wins is not a
 		# useful behaviour, so refuse rather than guess.
-		--uninstall|--setup-status)
+		--uninstall|--setup-status|--install)
 			if [ -n "$command" ]; then
 				echo "pdfulator: $arg and --$command can't be combined" >&2
 				exit 1
@@ -204,6 +265,145 @@ if [ -n "$expect" ]; then
 fi
 
 eval "set -- $args"
+
+
+# Interactive setup
+#
+# `pdfulator --install` asks the questions the tool already knows the answers
+# to. install.sh calls it after unpacking, and it stays available afterwards so
+# choices can be changed without reinstalling.
+#
+# Interactivity is decided by *opening* /dev/tty, not by testing it. Piped to
+# `sh`, stdin is the script, so `[ -t 0 ]` is always false; and `[ -r /dev/tty ]`
+# passes even with no controlling terminal, where the write then fails. Opening
+# it read-write fails cleanly in both cases, so this falls back to
+# non-interactive exactly when it should.
+TTY_OK=0
+open_tty() {
+	# Probe in a subshell first. dash (Debian's /bin/sh, and what the container
+	# runs) treats a failed redirection on `exec` as fatal to the whole shell --
+	# `2>/dev/null` doesn't contain it, and neither does `{ ...; }` grouping. A
+	# subshell does, so the failure costs us a child process instead of the run.
+	if (exec 3<>/dev/tty) 2>/dev/null; then
+		exec 3<>/dev/tty
+		TTY_OK=1
+	fi
+	# `|| true` is not needed here: the `if` consumes the test's status, so a
+	# false branch can't trip set -e.
+}
+
+# Prompt on the terminal and read the reply from it, so both survive stdout
+# being redirected into a PDF.
+ask() {  # ask <prompt> <default>; answer in $REPLY_VALUE
+	printf '%s' "$1" >&3
+	IFS= read -r REPLY_VALUE <&3 || REPLY_VALUE=""
+	# `if`, not `&&`: a non-empty answer makes the test false, and as the last
+	# command in the function that would trip set -e and kill the script --
+	# meaning any answer other than the default silently aborted setup.
+	if [ -z "$REPLY_VALUE" ]; then REPLY_VALUE=$2; fi
+}
+
+if [ "$command" = "install" ]; then
+	open_tty
+	if [ "$TTY_OK" != 1 ]; then
+		# No terminal: say what to run rather than guessing or half-configuring.
+		echo "" >&2
+		echo "Installed!  Now run:   pdfulator --install" >&2
+		echo "" >&2
+		exit 0
+	fi
+
+	echo "" >&3
+	echo "pdfulator setup" >&3
+	echo "" >&3
+
+	# --- Runtime -------------------------------------------------------
+	runtimes=$(list_runtimes || true)
+	echo "Runtimes found:" >&3
+	if [ -n "$runtimes" ]; then
+		i=0
+		printf '%s\n' "$runtimes" | while IFS="$(printf '\t')" read -r p label; do
+			i=$((i + 1))
+			printf '  %d. %-46s %s\n' "$i" "$p" "$label" >&3
+		done
+		i=$(printf '%s\n' "$runtimes" | wc -l | tr -d ' ')
+	else
+		i=0
+		echo "  (none)" >&3
+	fi
+	echo "  0. Install a dedicated bun for pdfulator (~60MB)" >&3
+
+	# Default to the first listed runtime, or to installing one if there are
+	# none. `if` rather than `&&`, which would trip set -e when the test fails.
+	if [ "$i" = 0 ]; then default_choice=0; else default_choice=1; fi
+	ask "Choose [$default_choice]: " "$default_choice"
+
+	if [ "$REPLY_VALUE" = 0 ]; then
+		install_bun || exit 1
+		RUNTIME=$BUN_PRIVATE
+	else
+		RUNTIME=$(printf '%s\n' "$runtimes" | sed -n "${REPLY_VALUE}p" | cut -f1)
+		[ -n "$RUNTIME" ] || { echo "pdfulator: no such choice." >&2; exit 1; }
+	fi
+	printf '%s\n' "$RUNTIME" > "$RUNTIME_CONF"
+	echo "Runtime: $RUNTIME" >&3
+
+	# install_deps and run_js both read $BUN, so adopt the choice now.
+	BUN=$RUNTIME
+
+	# Dependencies, now that there's a runtime to install them with. This has to
+	# happen before the browser question, because listing browsers means running
+	# pdfulator.js, which needs its imports.
+	if [ ! -d "$PDFULATOR_HOME/node_modules" ]; then
+		echo "Installing dependencies..." >&3
+		install_deps >&2 || {
+			echo "pdfulator: could not install dependencies." >&2
+			exit 1
+		}
+	fi
+	echo "" >&3
+
+	# --- Browser -------------------------------------------------------
+	if [ -s "$BROWSER_CONF" ]; then
+		echo "Browser: $(cat "$BROWSER_CONF")  (--browser to change)" >&3
+	else
+		browsers=$(run_js --list-browsers 2>&1 |
+			awk '/^  \//{print substr($0,3)}')
+
+		echo "Browsers found:" >&3
+		if [ -n "$browsers" ]; then
+			n=0
+			printf '%s\n' "$browsers" | while IFS= read -r b; do
+				n=$((n + 1)); printf '  %d. %s\n' "$n" "$b" >&3
+			done
+			n=$(printf '%s\n' "$browsers" | wc -l | tr -d ' ')
+		else
+			n=0
+			echo "  (none)" >&3
+		fi
+		echo "  0. Install chrome-headless-shell for pdfulator (~193MB)" >&3
+
+		if [ "$n" = 0 ]; then default_choice=0; else default_choice=1; fi
+		ask "Choose [$default_choice]: " "$default_choice"
+
+		if [ "$REPLY_VALUE" = 0 ]; then
+			run_js --install-browser >&2 || exit 1
+			chosen=$(run_js --list-browsers 2>&1 |
+				awk '/^  \//{print substr($0,3); exit}')
+		else
+			chosen=$(printf '%s\n' "$browsers" | sed -n "${REPLY_VALUE}p")
+		fi
+		[ -n "$chosen" ] || { echo "pdfulator: no such choice." >&2; exit 1; }
+		printf '%s\n' "$chosen" > "$BROWSER_CONF"
+		echo "Browser: $chosen" >&3
+	fi
+
+	echo "" >&3
+	echo "Ready. Try:  pdfulator yourfile.md" >&3
+	echo "" >&3
+	exec 3>&-
+	exit 0
+fi
 
 
 # Setup status
@@ -318,8 +518,19 @@ fi
 
 
 
-# Runtime. bun can disappear after install (a system upgrade, an uninstalled
-# package manager), so re-check every run rather than trusting a stamp.
+# Runtime. A choice pinned by --install wins, but is re-checked every run: it
+# can disappear under us (a system upgrade, an uninstalled package manager), and
+# silently falling back would be worse than saying so.
+if [ -z "${BUN:-}" ] && [ -s "$RUNTIME_CONF" ]; then
+	BUN=$(cat "$RUNTIME_CONF")
+	if [ ! -x "$BUN" ] && ! command -v "$BUN" >/dev/null 2>&1; then
+		echo "pdfulator: the chosen runtime is gone ($BUN)." >&2
+		echo "Run 'pdfulator --install' to choose another." >&2
+		rm -f "$RUNTIME_CONF"
+		exit 1
+	fi
+fi
+
 if [ -z "${BUN:-}" ]; then
 	BUN=$(find_bun) || {
 		if [ "$want_runtime" = 1 ]; then
@@ -333,11 +544,15 @@ if [ -z "${BUN:-}" ]; then
 fi
 
 # npm dependencies. install.sh deliberately doesn't run this -- node_modules is
-# platform-specific and needs a bun, which may only have arrived just now. It's
-# cheap to check and only ever runs once.
+# platform-specific and needs a runtime, which may only have arrived just now.
+# It's cheap to check and only ever runs once.
+#
+# bun installs from bun.lock; node and deno have no such lockfile here, so they
+# get npm's resolution of the same package.json. That's why bun is the runtime
+# we manage and the one to prefer.
 if [ ! -d "$PDFULATOR_HOME/node_modules" ]; then
 	echo "Installing dependencies..." >&2
-	(cd "$PDFULATOR_HOME" && "$BUN" install --frozen-lockfile) >&2 || {
+	install_deps >&2 || {
 		echo "pdfulator: dependency installation failed." >&2
 		exit 1
 	}
@@ -393,8 +608,7 @@ case $browser in
 	auto)
 		# Detect and pin in one step: pdfulator.js reports candidates best-first,
 		# so the first path it lists is the one to take.
-		found=$(PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" run "$PDFULATOR_HOME/pdfulator.js" \
-			--list-browsers 2>&1 | awk '/^  \//{print substr($0,3); exit}')
+		found=$(run_js --list-browsers 2>&1 | awk '/^  \//{print substr($0,3); exit}')
 		if [ -z "$found" ]; then
 			echo "pdfulator: no browser found to pin." >&2
 			echo "Try --browser install, or install one system-wide." >&2
@@ -406,15 +620,13 @@ case $browser in
 
 	find)
 		# Show everything and pin nothing -- the user picks.
-		PDFULATOR_HOME="$PDFULATOR_HOME" exec "$BUN" run "$PDFULATOR_HOME/pdfulator.js" --list-browsers
+		run_js --list-browsers; exit $?
 		;;
 
 	install)
 		# Download, then pin whatever it installed.
-		PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" run "$PDFULATOR_HOME/pdfulator.js" \
-			--install-browser >&2 || exit $?
-		found=$(PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" run "$PDFULATOR_HOME/pdfulator.js" \
-			--list-browsers 2>&1 | awk '/^  \//{print substr($0,3); exit}')
+		run_js --install-browser >&2 || exit $?
+		found=$(run_js --list-browsers 2>&1 | awk '/^  \//{print substr($0,3); exit}')
 		[ -n "$found" ] || { echo "pdfulator: install succeeded but no browser found." >&2; exit 1; }
 		CHROME_PATH=$found
 		pin_browser "$found"
@@ -446,8 +658,9 @@ export PDFULATOR_BUNDLED
 # append the options only the wrapper implements.
 case " $* " in
 	*" --help "*|*" -h "*)
-		"$BUN" run "$PDFULATOR_HOME/pdfulator.js" "$@" || true
+		run_js "$@" || true
 		echo "Bundle options:" >&2
+		echo "      --install             choose a runtime and browser (asks)" >&2
 		echo "  -b, --browser auto        detect a browser and remember it" >&2
 		echo "      --browser find        list browsers found on this machine" >&2
 		echo "      --browser install     download a private browser (~96MB)" >&2
@@ -461,4 +674,6 @@ esac
 # A bare `--browser <path>` with nothing to convert is just configuration.
 [ $# -eq 0 ] && [ -n "$browser" ] && exit 0
 
-exec "$BUN" run "$PDFULATOR_HOME/pdfulator.js" "$@"
+
+# Replace this shell: pdfulator.js owns the exit status and the signals.
+RUN_JS_EXEC=1 run_js "$@"

@@ -328,3 +328,12 @@ jobs:
             pdfulator.tar.gz.sha256
             install.sh
           fail_on_unmatched_files: true
+
+      # Refresh the site so /manifest lists the release we just made. This has
+      # to be an explicit call: the release was created with GITHUB_TOKEN, and
+      # GitHub suppresses workflow triggers from token-created events, so a
+      # `release: published` trigger in pages.yaml would never fire.
+      - name: Rebuild the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yaml --repo "$GITHUB_REPOSITORY" --ref v2
