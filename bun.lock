@@ -5,6 +5,7 @@
     "": {
       "name": "pdfulator",
       "dependencies": {
+        "@puppeteer/browsers": "^2.3.0",
         "@vivliostyle/viewer": "^2.0.0",
         "js-yaml": "^4.1.0",
         "markdown-it": "^14.0.0",

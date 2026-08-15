@@ -3,9 +3,9 @@ authors:
 - name: Tom Gidden
   email: tom@gidden.net
 date:
-  month: September
-  year: 2024
-revision: v.1.1.2
+  month: August
+  year: 2026
+revision: v.2
 pdfulator_features: shade_monospace narrow_monospace justify
 ...
 
@@ -17,22 +17,36 @@ pdfulator_features: shade_monospace narrow_monospace justify
 
 `pdfulator` is a Markdown-to-PDF converter using:
 
+- _[markdown-it](https://github.com/markdown-it/markdown-it)_ - Markdown parser
+- _[Vivliostyle](https://vivliostyle.org/)_ - Pagination, styling, PDF export
+- _[Mustache](https://mustache.github.io/)_ - Templating
+- _[Puppeteer](https://pptr.dev/)_ - Browser control
+- _[Bun](https://bun.sh/)_ - lightweight, powerful JS engine
+
+and optionally:
+
 - _[Docker](https://docker.com)_ - a containerization engine
-- _[Pandoc](https://pandoc.org)_ - a document format converter
-- _[PagedJS](https://pagedjs.org)_ - an library for paginating HTML
-- _[Chromium](https://www.chromium.org)_ - a PDF renderer ;)
-- some CSS, fonts, and some minor glue scripts.
+- _[Chromium](https://www.chromium.org)_ - contained browser for Puppeteer
+
+or:
+
+- Your existing installation of a browser that Puppeteer can control.
 
 It's not rocket science, but it's fiddly and usually not worth spending the time to assemble into a single utility.  That's what this is for.
 
+## Modes
 
-## Installation
+This version of `pdfulator` is designed to work in two different modes, both
+of which are valid, and both have pros and cons.
 
-The utility is packaged as a Docker image, as the dependencies are messy. You can pull down the image from Docker Hub:
+### Dockerized
+
+The utility can be packaged as a Docker image, to fully self-contain it. If you're
+already a Docker user, this is neat. You can pull down the image from Docker Hub:
 
 ```zsh
-docker pull tomgidden/pdfulator
-docker tag tomgidden/pdfulator pdfulator
+docker pull tomgidden/pdfulator:2
+docker tag tomgidden/pdfulator:2 pdfulator
 ```
 
 or you can build it yourself. To build the image, run:
@@ -47,72 +61,142 @@ or manually:
 docker build -t pdfulator .
 ```
 
-Due to the inclusion of _Chromium_ the image footprint is large.
+Then:
 
-## Usage
-
-Given a Markdown file `foo.md`, if you have the GNUmakefile in the current folder, you can run:
-
-```zsh
-make foo.pdf
+```
+docker run --rm --init -i pdfulator - < foo.md > foo.pdf
 ```
 
-or the hard way:
+or
 
-```zsh
-docker run --rm --init -i tomgidden/pdfulator - < foo.md > foo.pdf
+```
+docker run --rm --init -v $(pwd):/in pdfulator --watch
 ```
 
-That's it. For continuous update whenever the Markdown changes, run:
+### Bundled
 
-```zsh
-make watch
+Wrapper scripts are used to install the script and dependencies to
+`~/.local/share/pdfulator`, or somewhere else you choose. It can use one of your
+existing Chromium-based browsers, and even try to locate them; or you can tell
+it to install a minimal browser (`chrome-headless-shell`) for its own use.
+
+On first run, you'll need:
+
+```bash
+pdfulator --browser XXX
 ```
 
-or the hard way:
+where `XXX` is one of:
 
-```zsh
-docker run --rm --init -v $(pwd):/in tomgidden/pdfulator --watch
+- `auto`:    locate an installed Chromium browser and remember it
+- `find`:    list located browsers for you to choose
+- `install`: install a minimal browser inside the pdfulator install
+- a path to a browser executable.
+
+After that, it should remember your choice.
+
+If all goes well, you can just do:
+
+- `pdfulator README.md` (generates `README.pdf`)
+- `pdfulator README.md foo.pdf` (generates `foo.pdf`)
+- `pdfulator .` (converts every `*.md` in the current folder)
+- `pdfulator - < foo.md > foo.pdf` or `cat foo.md | pdfulator - > foo.pdf`
+
+and you can uninstall with `pdfulator --uninstall`
+
+## Options
+
 ```
+pdfulator [options] input.md [output.pdf]
+pdfulator [options] -                      stdin → stdout
+pdfulator [options] dir/                   convert all *.md in a directory
+pdfulator --watch [options] dir/           rebuild on change
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-t`, `--theme <name\|path>` | Theme to use |
+| `-d`, `--debug` | Keep the intermediate HTML |
+| `-v`, `--verbose` | Verbose output |
+| `-w`, `--watch` | Watch a directory for changes |
+| `-h`, `--help` | Show help |
+
+The bundled wrapper adds a few of its own:
+
+| Option | Meaning |
+| --- | --- |
+| `-b`, `--browser auto\|find\|install\|<path>` | Choose the rendering browser (remembered) |
+| `--install-runtime` | Download a private copy of _bun_ if none is installed |
+| `--uninstall` | Remove pdfulator, keeping anything you added or edited |
+
+Nothing is downloaded or launched without you asking: pdfulator will explain
+what it needs and wait rather than picking a browser or fetching a runtime on
+your behalf.
+
+### What it installs, and where
+
+Everything lives under `$PDFULATOR_HOME` (`~/.local/share/pdfulator` by
+default), plus the wrapper itself in `$PDFULATOR_BIN` (`~/.local/bin`):
+
+| Path | Contents | Size |
+| --- | --- | --- |
+| `pdfulator.js`, `defaults/`, `theme/` | The application | small |
+| `node_modules/` | npm dependencies | ~30MB |
+| `bun/` | Private _bun_, only if you asked for one | ~60MB |
+| `chromium/` | `chrome-headless-shell`, only if you asked for one | ~193MB |
+
+`pdfulator --uninstall` removes all of it, except files you have added or
+modified — your themes and any edited stylesheets are kept, and it tells you
+what it left behind.
 
 ## Customisation and development
 
-### Immediate single-file mode
+Working on pdfulator itself needs [bun](https://bun.sh) and a Chromium-based
+browser:
 
 ```zsh
-DEBUG=1 make foo.pdf
+bun install
+CHROME_PATH=/path/to/chrome bun run pdfulator.js README.md
 ```
 
-That should do three things:
-
-- Use the current `defaults` folder rather than the baked-in copy in the Docker image;
-- Use the current folder's `entrypoint.sh` rather than the baked-in copy in the Docker image;
-- Preserve the intermediate `work` folder, containing the generated HTML file.
-
-As a result, you can tweak the CSS and other things in `defaults` and quickly see the result without having to rebuild the Docker image.
-
-For example, a dev workflow might look like this:
+`--debug` keeps the generated HTML next to the PDF, which is usually what you
+want when adjusting a theme; `--watch` re-renders on every save:
 
 ```zsh
-DEBUG=1 make -B foo.pdf && open foo.pdf
+bun run pdfulator.js --debug --theme ./my_theme README.md
+bun run pdfulator.js --watch .
 ```
 
-or even better, just use watch mode:
+To build the distributable wrapper from a checkout:
 
 ```zsh
-DEBUG=1 make watch
+make bundle           # produces ./pdfulator
+make install-bundle   # ...and copies it to ~/.local/bin
 ```
-
-Once you're happy with the style, you can build your own version of the image and use it anywhere without having to also transfer any assets.
 
 ## Styling
 
 The current CSS is a simple Humanist "white-paper" layout typical of my general tastes. I was influenced in my youth by the original [1995 Java™ white paper](https://web.archive.org/web/20240524160851/https://www.stroustrup.com/1995_Java_whitepaper.pdf)s and other documentation from Sun, and this is somewhat simplified version. It's very rough-and-ready, but it does enough for me right now.  I have been wondering if it's worth having multiple themes somehow.
 
-You can override the styling by adding a `theme` folder with custom stylesheets, fonts and other assets. This should override the ones in `defaults`:
+You can override the styling with a theme folder of your own containing custom stylesheets, fonts and other assets. These override the ones in `defaults`:
 
 ```zsh
-EXTRA_DOCKER_OPTS="-v $(pwd)/my_css:/theme" make foo.pdf
+pdfulator --theme ./my_theme foo.md
+```
+
+A named theme is looked for in, in order: `./themes/<name>/`,
+`~/.local/share/pdfulator/themes/<name>/`, then the built-in default. So a theme
+installed in the second of those is available anywhere:
+
+```zsh
+pdfulator --theme corporate foo.md
+```
+
+Under Docker, mount the theme into the container instead:
+
+```zsh
+docker run --rm --init -i -v $(pwd)/my_theme:/app/theme \
+  tomgidden/pdfulator:2 - < foo.md > foo.pdf
 ```
 
 ### Logo
@@ -215,7 +299,7 @@ If there is a file `logo.svg` in the `theme` folder, it will be used in the top-
 
 [ ] _TOCs_
 
-[ ] _Better images_. You can put things in the `theme` folder that can then be referenced for use in `DEBUG=1`, and you can (presumably) use remote URL files.  However, there's no easy way to pass them into the container for processing at this time.  More thought needed.
+[ ] _Better images_. Assets in the theme folder can be referenced, and remote URLs presumably work.  Under Docker they still have to be mounted in, which is awkward.  More thought needed.
 
 [ ] _Improved layout_. This is still a work in progress.
 
@@ -223,9 +307,13 @@ If there is a file `logo.svg` in the `theme` folder, it will be used in the top-
 
 [ ] _Comprehensive support for the format_
 
-[ ] _HTML_, _EPUB_, etc. Given the use of _Pandoc_ these should be very simple to support. I'm just an old fart that likes neat A4 documents even if I never actually print them out.
+[ ] _HTML_, _EPUB_, etc. The pipeline already produces HTML on the way to PDF, so exposing it should be straightforward. I'm just an old fart that likes neat A4 documents even if I never actually print them out.
+
+[ ] _Multiple files on the command line_. `pdfulator a.md b.md` currently converts only the first; use `pdfulator .` for a whole folder in the meantime.
 
 [ ] Testing of `--watch` and improvement on file globbing and so on.
+
+[ ] _One-line installer_. `curl -fsSL https://.../install.sh | bash`, with the wrapper distributed from CI rather than built from a checkout.
 
 Any feedback, assistance or code contributions welcome.
 

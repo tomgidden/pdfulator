@@ -55,6 +55,8 @@ function parseArgs(argv) {
     verbose: false,
     watch: false,
     help: false,
+    installBrowser: false,
+    listBrowsers: false,
     inputs: [],
   };
 
@@ -64,6 +66,8 @@ function parseArgs(argv) {
     else if (a === '-d' || a === '--debug')    { opts.debug = true; }
     else if (a === '-v' || a === '--verbose')  { opts.verbose = true; }
     else if (a === '-w' || a === '--watch')    { opts.watch = true; }
+    else if (a === '--install-browser')        { opts.installBrowser = true; }
+    else if (a === '--list-browsers')          { opts.listBrowsers = true; }
     else if (a === '-t' || a === '--theme')    { opts.theme = args[++i]; }
     else if (a.startsWith('--theme='))         { opts.theme = a.slice(8); }
     else                                        { opts.inputs.push(a); }
@@ -87,7 +91,12 @@ Options:
   -d, --debug               keep intermediate files
   -v, --verbose             verbose output
   -w, --watch               watch for changes (directory mode)
+      --list-browsers       list Chromium-based browsers found here
+      --install-browser     download a private Chromium for pdfulator's use
   -h, --help                show this help
+
+The browser to render with is never chosen automatically: set CHROME_PATH, or
+use the bundled pdfulator's --browser auto|find|install|<path>.
 
 Theme resolution:
   1. Path supplied to --theme (absolute or relative to cwd)
@@ -129,42 +138,417 @@ function resolveTheme(name) {
 
 // Chromium detection
 
-const CHROMIUM_CANDIDATES = [
-  // macOS — system and user Applications
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  `${os.homedir()}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
-  `${os.homedir()}/Applications/Chromium.app/Contents/MacOS/Chromium`,
-  `${os.homedir()}/Applications/Brave Browser.app/Contents/MacOS/Brave Browser`,
-  // Linux
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/brave-browser',
-  '/usr/bin/microsoft-edge',
-  '/snap/bin/chromium',
-];
+const HOME = os.homedir();
 
-function findChromium() {
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+// Per-platform lists, most-preferred first. Only the current platform's list is
+// consulted, so a name that means different things on different systems (say
+// `chrome` on Windows vs a stray script on Linux) can't leak across.
+const CHROMIUM_CANDIDATES_BY_PLATFORM = {
+  darwin: [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+    '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Vivaldi.app/Contents/MacOS/Vivaldi',
+    `${HOME}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+    `${HOME}/Applications/Chromium.app/Contents/MacOS/Chromium`,
+    `${HOME}/Applications/Brave Browser.app/Contents/MacOS/Brave Browser`,
+    `${HOME}/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge`,
+  ],
 
-  for (const p of CHROMIUM_CANDIDATES) {
-    if (fs.existsSync(p)) return p;
+  linux: [
+    // Distro packages
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/brave-browser',
+    '/usr/bin/microsoft-edge',
+    '/usr/bin/microsoft-edge-stable',
+    '/usr/bin/vivaldi-stable',
+    // Locally installed / vendor tarballs
+    '/usr/local/bin/chromium',
+    '/usr/local/bin/google-chrome',
+    '/opt/google/chrome/chrome',
+    '/opt/microsoft/msedge/msedge',
+    '/opt/brave.com/brave/brave-browser',
+    // Snap
+    '/snap/bin/chromium',
+    '/snap/bin/google-chrome',
+    '/snap/bin/brave',
+    // Flatpak — the wrapper binaries inside the runtime tree. Launching these
+    // directly (rather than via `flatpak run`) keeps puppeteer's --flags and
+    // stdio behaviour intact; the sandbox still applies.
+    '/var/lib/flatpak/app/com.google.Chrome/current/active/files/chrome/chrome',
+    '/var/lib/flatpak/app/org.chromium.Chromium/current/active/files/chromium/chromium',
+    '/var/lib/flatpak/app/com.brave.Browser/current/active/files/brave/brave',
+    `${HOME}/.local/share/flatpak/app/com.google.Chrome/current/active/files/chrome/chrome`,
+    `${HOME}/.local/share/flatpak/app/org.chromium.Chromium/current/active/files/chromium/chromium`,
+  ],
+
+  win32: [
+    // %LOCALAPPDATA% first: per-user installs are the common case and don't
+    // need admin rights, so they're what a desktop user most likely has.
+    ...(process.env.LOCALAPPDATA
+      ? [
+          `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+          `${process.env.LOCALAPPDATA}\\Chromium\\Application\\chrome.exe`,
+          `${process.env.LOCALAPPDATA}\\Microsoft\\Edge\\Application\\msedge.exe`,
+          `${process.env.LOCALAPPDATA}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+        ]
+      : []),
+    ...(process.env.PROGRAMFILES
+      ? [
+          `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
+          `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
+          `${process.env.PROGRAMFILES}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+        ]
+      : []),
+    ...(process.env['PROGRAMFILES(X86)']
+      ? [
+          `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
+          `${process.env['PROGRAMFILES(X86)']}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        ]
+      : []),
+  ],
+};
+
+// Names to look for on $PATH when no known location matched.
+const CHROMIUM_PATH_NAMES = process.platform === 'win32'
+  ? ['chrome.exe', 'msedge.exe', 'chromium.exe']
+  : [
+      'chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable',
+      'brave-browser', 'microsoft-edge', 'vivaldi-stable',
+    ];
+
+// Every browser we can find, best-guess first. Detection only ever *offers*
+// candidates -- choosing one is the user's call, made once via --browser and
+// pinned thereafter. Nothing here is launched as a side effect of searching.
+function listChromiumCandidates() {
+  const found = [];
+  const seen = new Set();
+  const add = (p, source) => {
+    if (!p || seen.has(p)) return;
+    seen.add(p);
+    found.push({ path: p, source });
+  };
+
+  const managed = findManagedBrowser();
+  if (managed) add(managed, 'installed by pdfulator');
+
+  for (const p of CHROMIUM_CANDIDATES_BY_PLATFORM[process.platform] || []) {
+    if (fs.existsSync(p)) add(p, 'system');
   }
 
-  // Try which/where as a fallback
-  for (const name of ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable']) {
+  // $PATH last: it's the least predictable source, since anything named
+  // `chromium` anywhere on the path will match.
+  const lookup = process.platform === 'win32' ? 'where' : 'which';
+  for (const name of CHROMIUM_PATH_NAMES) {
     try {
-      const found = execSync(`which ${name} 2>/dev/null`, { encoding: 'utf8' }).trim();
-      if (found) return found;
+      const out = execSync(`${lookup} ${name}`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      for (const line of out.split(/\r?\n/)) {
+        const p = line.trim();
+        if (p && fs.existsSync(p)) add(fs.realpathSync(p), 'on PATH');
+      }
     } catch { /* not found */ }
   }
 
+  return found;
+}
+
+// The browser to actually use. Only ever an explicit choice: $CHROME_PATH from
+// the caller, or the path the wrapper pinned. No implicit search.
+function resolveChromium() {
+  return process.env.CHROME_PATH || null;
+}
+
+// Shown when nothing is pinned yet. This is setup guidance, not a failure --
+// it's the expected first-run state -- so it reads as instructions. It still
+// goes to stderr, both because stdout may be a PDF and because the exit is
+// non-zero: no document was produced.
+function setupMessage() {
+  // In the Docker image the browser is baked in and CHROME_PATH is set at build
+  // time, so there is no choice to make -- if we got here, the image is broken.
+  // Listing the user's browsers would be noise: they aren't in the container.
+  if (fs.existsSync('/.dockerenv')) {
+    return `\
+Error: no browser in this container.
+
+The pdfulator image installs Chromium and sets CHROME_PATH at build time, so
+this means the image is broken or CHROME_PATH has been overridden. Rebuild it,
+or run with -e CHROME_PATH=/usr/bin/chromium.`;
+  }
+
+  const candidates = listChromiumCandidates();
+  const flatpak = candidates.length === 0 ? findFlatpakBrowser() : null;
+
+  // Only the bundled wrapper implements --browser and can pin a choice. Run
+  // any other way -- in the Docker image, or straight from a checkout -- the
+  // equivalent is CHROME_PATH. Advertise whichever the user can actually use.
+  const bundled = !!process.env.PDFULATOR_BUNDLED;
+
+  const lines = [
+    'pdfulator needs a browser to render PDFs, and none is chosen yet.',
+    '',
+    'It uses Chrome, Chromium, Brave, Edge or Vivaldi -- the PDF is produced by',
+    "Chromium's own print engine, which Firefox and Safari have no equivalent for.",
+    '',
+    'Choose one, once:',
+    '',
+  ];
+
+  if (bundled) {
+    if (candidates.length > 0) {
+      lines.push(`  pdfulator --browser auto        use ${candidates[0].path}`);
+      lines.push('  pdfulator --browser find        list every browser found here');
+    }
+    if (cftPlatform()) {
+      // Offered only where a Chrome for Testing build exists; there is no
+      // linux-arm64, and promising it there would be a dead end.
+      lines.push('  pdfulator --browser install     download a private copy (~96MB)');
+    }
+    lines.push(
+      `  pdfulator --browser ${process.platform === 'win32' ? 'C:\\path\\to\\chrome.exe' : '/path/to/chrome'}   use a specific one`,
+    );
+  } else {
+    // Running pdfulator.js directly: no pin file, so the choice is an env var.
+    const set = process.platform === 'win32' ? 'set CHROME_PATH=' : 'export CHROME_PATH=';
+    if (candidates.length > 0) {
+      lines.push(`  ${set}"${candidates[0].path}"`);
+      lines.push('  pdfulator --list-browsers       list every browser found here');
+    }
+    if (cftPlatform()) {
+      lines.push('  pdfulator --install-browser     download a private copy (~96MB)');
+    }
+  }
+
+  if (candidates.length > 0) {
+    lines.push('', `Found ${candidates.length} browser${candidates.length === 1 ? '' : 's'} on this machine:`);
+    for (const c of candidates.slice(0, 5)) {
+      lines.push(`  ${c.path}  (${c.source})`);
+    }
+    if (candidates.length > 5) {
+      lines.push(`  ...and ${candidates.length - 5} more (${bundled ? '--browser find' : '--list-browsers'})`);
+    }
+  } else if (flatpak) {
+    const how = bundled
+      ? `  pdfulator --browser /var/lib/flatpak/app/${flatpak}/current/active/files/chrome/chrome`
+      : `  export CHROME_PATH=/var/lib/flatpak/app/${flatpak}/current/active/files/chrome/chrome`;
+    lines.push(
+      '',
+      `The only browser here is the Flatpak ${flatpak}, which cannot be launched`,
+      'directly. Point at the binary inside it, e.g.',
+      how,
+    );
+  } else {
+    const hint = {
+      darwin: '  brew install --cask google-chrome',
+      linux: `  sudo apt install chromium              (Debian/Ubuntu)
+  sudo dnf install chromium              (Fedora/RHEL)
+  sudo pacman -S chromium                (Arch)`,
+      win32: '  winget install Google.Chrome',
+    }[process.platform];
+    if (hint) lines.push('', 'No browser found here. Install one system-wide:', hint);
+  }
+
+  lines.push('', bundled
+    ? 'Your choice is remembered; --browser again to change it.'
+    : 'Set CHROME_PATH in your shell profile to make this permanent.');
+  return lines.join('\n');
+}
+
+// `--browser find` output: everything, with a ready-to-paste command per entry.
+function listBrowsersMessage() {
+  const candidates = listChromiumCandidates();
+  if (candidates.length === 0) return setupMessage();
+
+  const lines = ['Browsers found on this machine:', ''];
+  for (const c of candidates) {
+    lines.push(`  ${c.path}`);
+    lines.push(`      ${c.source}`);
+    lines.push(`      pdfulator --browser ${/\s/.test(c.path) ? `"${c.path}"` : c.path}`);
+    lines.push('');
+  }
+  lines.push('Run one of the above to pin your choice.');
+  return lines.join('\n');
+}
+
+// Puppeteer needs a real executable, so a Flatpak-only install can't be driven
+// directly. Detecting one lets us give a useful hint instead of "not found".
+function findFlatpakBrowser() {
+  if (process.platform !== 'linux') return null;
+
+  for (const app of ['com.google.Chrome', 'org.chromium.Chromium', 'com.brave.Browser']) {
+    try {
+      execSync(`flatpak info ${app}`, { stdio: 'ignore' });
+      return app;
+    } catch { /* not installed */ }
+  }
   return null;
+}
+
+
+// Managed browser
+//
+// --install-browser fetches chrome-headless-shell into PDFULATOR_HOME/chromium
+// via @puppeteer/browsers -- the same downloader puppeteer itself uses, so we
+// inherit its platform detection, proxy support, mirror configuration and
+// resumable downloads rather than maintaining our own.
+//
+// headless-shell rather than full Chrome: half the size (~193MB vs ~356MB
+// unpacked) and, having no UI layer, exactly what a headless PDF pipeline
+// needs. Verified to produce an identical text layer to full Chrome here.
+//
+// Never automatic -- downloading ~100MB is something the user should ask for.
+
+const PDFULATOR_HOME =
+  process.env.PDFULATOR_HOME || path.join(HOME, '.local', 'share', 'pdfulator');
+const MANAGED_BROWSER_DIR = path.join(PDFULATOR_HOME, 'chromium');
+const MANAGED_BROWSER = 'chrome-headless-shell';
+
+// @puppeteer/browsers is a dependency of puppeteer-core, but we use it
+// directly, so it's declared in package.json too. Imported lazily: it pulls in
+// a sizeable tree that a normal conversion never needs.
+async function puppeteerBrowsers() {
+  return import('@puppeteer/browsers');
+}
+
+// Whether this platform has a chrome-headless-shell build at all. There is no
+// linux-arm64 one, and offering a download that can't work is a dead end.
+function browserDownloadSupported() {
+  // Cheap structural check, matching @puppeteer/browsers' own platform matrix.
+  if (process.platform === 'linux' && process.arch !== 'x64') return false;
+  return ['darwin', 'linux', 'win32'].includes(process.platform);
+}
+
+// Kept for callers that want a yes/no without importing the browsers package.
+const cftPlatform = () => (browserDownloadSupported() ? process.platform : null);
+
+// An already-installed managed browser, if there is one.
+function findManagedBrowser() {
+  if (!fs.existsSync(MANAGED_BROWSER_DIR)) return null;
+
+  try {
+    // getInstalledBrowsers is async, so do the cheap synchronous thing here:
+    // the cache layout is <cacheDir>/<browser>/<platform>-<buildId>/...
+    const root = path.join(MANAGED_BROWSER_DIR, MANAGED_BROWSER);
+    if (!fs.existsSync(root)) return null;
+
+    const exeName = process.platform === 'win32'
+      ? 'chrome-headless-shell.exe'
+      : 'chrome-headless-shell';
+
+    // Newest build first, so an upgrade takes effect without a manual clean.
+    const builds = fs.readdirSync(root).sort().reverse();
+    for (const b of builds) {
+      const dir = path.join(root, b);
+      const hit = findFileNamed(dir, exeName, 3);
+      if (hit) return hit;
+    }
+  } catch { /* unreadable cache: treat as absent */ }
+
+  return null;
+}
+
+// Small bounded search: the binary sits 1-3 levels below the build directory
+// depending on platform (chrome-headless-shell-linux64/, ...mac-arm64/, etc).
+function findFileNamed(dir, name, depth) {
+  if (depth < 0) return null;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isFile() && e.name === name) return full;
+  }
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      const hit = findFileNamed(path.join(dir, e.name), name, depth - 1);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+async function installBrowser(verbose) {
+  if (!browserDownloadSupported()) {
+    console.error(`\
+Error: no chrome-headless-shell build for ${process.platform}/${process.arch}.
+
+${process.platform === 'linux' && process.arch === 'arm64'
+  ? "On ARM Linux, install your distro's package instead:\n  sudo apt install chromium"
+  : 'Install a Chromium-based browser manually and set CHROME_PATH.'}
+`);
+    process.exit(1);
+  }
+
+  const browsers = await puppeteerBrowsers();
+
+  const platform = browsers.detectBrowserPlatform();
+  if (!platform) {
+    console.error('Error: could not determine this platform for the download.');
+    process.exit(1);
+  }
+
+  console.error('Resolving latest chrome-headless-shell...');
+
+  let buildId;
+  try {
+    buildId = await browsers.resolveBuildId(MANAGED_BROWSER, platform, 'stable');
+  } catch (err) {
+    console.error(`Error: could not reach the Chrome for Testing feed -- ${err.message}`);
+    process.exit(1);
+  }
+
+  console.error(`Downloading chrome-headless-shell ${buildId} for ${platform}...`);
+
+  // Progress on one rewritten line, and only for a terminal -- in a pipe or a
+  // CI log it would just be thousands of stray writes.
+  const showProgress = process.stderr.isTTY;
+  let lastPct = -1;
+
+  let installed;
+  try {
+    installed = await browsers.install({
+      browser: MANAGED_BROWSER,
+      buildId,
+      platform,
+      cacheDir: MANAGED_BROWSER_DIR,
+      downloadProgressCallback: (done, total) => {
+        if (!showProgress || !total) return;
+        const pct = Math.floor((done / total) * 100);
+        if (pct === lastPct) return;
+        lastPct = pct;
+        process.stderr.write(`\r  ${pct}%  (${(done / 1048576).toFixed(0)}/${(total / 1048576).toFixed(0)}MB)`);
+      },
+    });
+    if (showProgress && lastPct >= 0) process.stderr.write('\n');
+  } catch (err) {
+    if (showProgress && lastPct >= 0) process.stderr.write('\n');
+    console.error(`Error: download failed -- ${err.message}`);
+    process.exit(1);
+  }
+
+  const exe = installed.executablePath;
+  if (!exe || !fs.existsSync(exe)) {
+    console.error('Error: the download finished but no binary was found.');
+    process.exit(1);
+  }
+
+  // Downloads carry macOS's quarantine flag, which blocks launching outright.
+  if (process.platform === 'darwin') {
+    try {
+      execSync(`xattr -dr com.apple.quarantine "${MANAGED_BROWSER_DIR}"`, { stdio: 'ignore' });
+    } catch { /* xattr missing or nothing to clear */ }
+  }
+
+  if (verbose) console.error(`Cache: ${MANAGED_BROWSER_DIR}`);
+  console.error(`\nInstalled to ${exe}`);
+  return exe;
 }
 
 
@@ -541,22 +925,25 @@ async function main() {
 
   if (opts.help) { showHelp(); process.exit(0); }
 
+  // Both run on their own, and must work precisely when the browser check
+  // below would otherwise stop us.
+  if (opts.listBrowsers) {
+    console.error(listBrowsersMessage());
+    process.exit(0);
+  }
+
+  if (opts.installBrowser) {
+    await installBrowser(opts.verbose);
+    if (opts.inputs.length === 0) process.exit(0);
+  }
+
   const themeDir = resolveTheme(opts.theme);
   if (opts.verbose) console.error(`Theme: ${themeDir}`);
 
-  // Chromium check
-  const chromiumPath = findChromium();
+  // Which browser? Only ever an explicit choice -- see setupMessage().
+  const chromiumPath = resolveChromium();
   if (!chromiumPath) {
-    console.error(`\
-Error: no Chromium-based browser found.
-
-Install one of:
-  macOS:  brew install --cask google-chrome
-          brew install --cask chromium
-  Linux:  sudo apt install chromium   (or chromium-browser, google-chrome-stable)
-
-Or set CHROME_PATH=/path/to/chrome
-`);
+    console.error(setupMessage());
     process.exit(1);
   }
   if (opts.verbose) console.error(`Chromium: ${chromiumPath}`);
