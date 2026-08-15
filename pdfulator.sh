@@ -134,20 +134,76 @@ if [ ! -f "$PDFULATOR_HOME/pdfulator.js" ]; then
 fi
 
 
-# --install-runtime is consent to download bun. Pull it out of the arguments
-# early: it applies before any of the main parsing.
-want_runtime=0
-for a in "$@"; do
-	[ "$a" = "--install-runtime" ] && want_runtime=1
+# Argument parsing
+#
+# One pass, before anything else looks at "$@". Wrapper-only flags are consumed
+# here and never reach pdfulator.js; everything else is passed through verbatim.
+#
+# Two things this has to get right, both of which the previous per-flag scans
+# got wrong:
+#
+#   * Flags that take a value. `--theme -b` must give pdfulator.js a theme
+#     called "-b", not silently hand "-b" to the wrapper. So the parser knows
+#     which pass-through flags consume the following argument, and copies both
+#     across without inspecting the value.
+#
+#   * Position. `--uninstall` and friends used to be matched as "$1" only, so
+#     `pdfulator foo.md --uninstall` fell through to pdfulator.js and created a
+#     file named "--uninstall". They are now recognised anywhere.
+
+# Shell-quote one argument for the eval that reinstates "$@" below.
+quote() { printf '%s' "$1" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/"; }
+
+args=""            # pass-through arguments, shell-quoted
+browser=""         # --browser value, if given
+want_runtime=0     # --install-runtime seen
+command=""         # a wrapper subcommand: uninstall | setup-status
+expect=""          # non-empty while consuming a flag's value
+
+for arg in "$@"; do
+	# Value of a wrapper flag we saw last time round.
+	if [ -n "$expect" ]; then
+		case $expect in
+			browser)     browser=$arg ;;
+			passthrough) args="$args $(quote "$arg")" ;;
+		esac
+		expect=""
+		continue
+	fi
+
+	case $arg in
+		# Wrapper subcommands. Mutually exclusive; last one wins is not a
+		# useful behaviour, so refuse rather than guess.
+		--uninstall|--setup-status)
+			if [ -n "$command" ]; then
+				echo "pdfulator: $arg and --$command can't be combined" >&2
+				exit 1
+			fi
+			command=${arg#--}
+			;;
+
+		--install-runtime)  want_runtime=1 ;;
+
+		# Wrapper flags taking a value.
+		--browser|-b)       expect=browser ;;
+		--browser=*)        browser=${arg#--browser=} ;;
+
+		# Pass-through flags taking a value: copy the flag now, the value next.
+		-t|--theme)         args="$args $(quote "$arg")"; expect=passthrough ;;
+
+		*)                  args="$args $(quote "$arg")" ;;
+	esac
 done
-if [ "$want_runtime" = 1 ]; then
-	rest=""
-	for a in "$@"; do
-		[ "$a" = "--install-runtime" ] && continue
-		rest="$rest $(printf '%s' "$a" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/")"
-	done
-	eval "set -- $rest"
+
+if [ -n "$expect" ]; then
+	case $expect in
+		browser)     echo "pdfulator: --browser needs auto, find, install, or a path" >&2 ;;
+		passthrough) echo "pdfulator: --theme needs a name or path" >&2 ;;
+	esac
+	exit 1
 fi
+
+eval "set -- $args"
 
 
 # Setup status
@@ -156,7 +212,7 @@ fi
 # after unpacking so the "what now" advice comes from the thing that actually
 # knows, rather than being duplicated in the installer.
 
-if [ "${1:-}" = "--setup-status" ]; then
+if [ "$command" = "setup-status" ]; then
 	need=0
 
 	if find_bun >/dev/null 2>&1; then
@@ -192,7 +248,7 @@ fi
 
 # Uninstall
 
-if [ "${1:-}" = "--uninstall" ]; then
+if [ "$command" = "uninstall" ]; then
 	if [ ! -f "$STAMP" ]; then
 		echo "pdfulator is not installed at $PDFULATOR_HOME" >&2
 		exit 1
@@ -308,26 +364,7 @@ fi
 # With no switch: use the pin if there is one, otherwise let pdfulator.js
 # print its setup message.
 
-# Strip --browser/-b out of "$@" -- pdfulator.js has no such flag.
-args=""
-browser=""
-skip_next=0
-for arg in "$@"; do
-	if [ "$skip_next" = 1 ]; then
-		browser=$arg
-		skip_next=0
-		continue
-	fi
-	case $arg in
-		--browser|-b)   skip_next=1 ;;
-		--browser=*)    browser=${arg#--browser=} ;;
-		*)              args="$args $(printf '%s' "$arg" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/")" ;;
-	esac
-done
-[ "$skip_next" = 1 ] && {
-	echo "pdfulator: --browser needs auto, find, install, or a path" >&2
-	exit 1
-}
+# $browser was set by the parser above; "$@" already has the flag removed.
 
 # Write the pin and report it. Shared by every branch that settles on a path.
 pin_browser() {
@@ -403,8 +440,7 @@ export PDFULATOR_HOME
 PDFULATOR_BUNDLED=1
 export PDFULATOR_BUNDLED
 
-# Reinstate the filtered arguments.
-eval "set -- $args"
+# ("$@" was already reinstated by the parser near the top.)
 
 # --help comes from pdfulator.js, which knows nothing about the bundle, so
 # append the options only the wrapper implements.

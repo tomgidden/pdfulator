@@ -95,8 +95,14 @@ install-local: $(DIST) $(DIST).sha256
 bun.lock: package.json
 	bun install
 
+# Argument-handling matrices. Both need a CHROME_PATH (or a pinned browser);
+# wrapmatrix additionally needs the tarball, since it installs what it tests.
+test: $(DIST)
+	bash tests/argmatrix.sh
+	bash tests/wrapmatrix.sh
+
 clean:
 	rm -rf .dist $(DIST) $(DIST).sha256
 
-.PHONY: all watch docker-watch build release dist install-local clean
+.PHONY: all watch docker-watch build release dist install-local test clean
 
