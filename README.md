@@ -215,12 +215,16 @@ pdfulator --theme ./my_theme foo.md
 ```
 
 A named theme is looked for in, in order: `./themes/<name>/`,
-`~/.local/share/pdfulator/themes/<name>/`, then the built-in default. So a theme
-installed in the second of those is available anywhere:
+`$PDFULATOR_HOME/themes/<name>/`, then `themes/<name>/` alongside the script. So
+a theme installed in the second of those is available anywhere:
 
 ```zsh
 pdfulator --theme corporate foo.md
 ```
+
+If the named theme isn't found, pdfulator stops and says where it looked. It
+won't quietly fall back to the default — a typo would otherwise produce a
+perfectly plausible PDF in the wrong style, which you'd only catch by eye.
 
 Under Docker, mount the theme into the container instead:
 

@@ -110,29 +110,53 @@ Theme resolution:
 
 // Theme resolution
 
-function resolveTheme(name) {
-  if (!name) {
-    return path.join(SCRIPT_DIR, 'theme');
-  }
+const BUILTIN_THEME = path.join(SCRIPT_DIR, 'theme');
 
-  // Absolute or explicit relative path
+function isDir(p) {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+// A named theme is looked for in the working directory, then the user's
+// installation, then alongside the script. A path is taken as given.
+//
+// Not finding one is an error, not a fallback. Quietly rendering with the
+// default theme means a typo produces a plausible-looking PDF in the wrong
+// style -- the kind of mistake you only catch by eye, after sending it.
+function resolveTheme(name) {
+  if (!name) return BUILTIN_THEME;
+
+  // Absolute or explicit relative path: the user has told us exactly where.
   if (path.isAbsolute(name) || name.startsWith('./') || name.startsWith('../')) {
+    if (!isDir(name)) {
+      console.error(`Error: theme directory not found: ${name}`);
+      process.exit(1);
+    }
     return name;
   }
 
-  const candidates = [
+  // $PDFULATOR_HOME rather than a hardcoded ~/.local/share/pdfulator, so a
+  // relocated install finds its own themes.
+  const home = process.env.PDFULATOR_HOME
+    || path.join(os.homedir(), '.local', 'share', 'pdfulator');
+
+  // Deduplicated: cwd and SCRIPT_DIR coincide when running from a checkout,
+  // and listing the same path twice in the error below reads like a bug.
+  const candidates = [...new Set([
     path.join(process.cwd(), 'themes', name),
-    path.join(os.homedir(), '.local', 'share', 'pdfulator', 'themes', name),
+    path.join(home, 'themes', name),
     path.join(SCRIPT_DIR, 'themes', name),
-    path.join(SCRIPT_DIR, 'theme'),
-  ];
+  ])];
 
   for (const c of candidates) {
-    if (fs.existsSync(c) && fs.statSync(c).isDirectory()) return c;
+    if (isDir(c)) return c;
   }
 
-  console.error(`Warning: theme "${name}" not found, using built-in default`);
-  return path.join(SCRIPT_DIR, 'theme');
+  // Deliberately not falling back to BUILTIN_THEME: it exists unconditionally,
+  // so including it above would make this unreachable.
+  console.error(`Error: no theme named "${name}".`);
+  console.error('Looked in:');
+  for (const c of candidates) console.error(`  ${c}`);
+  process.exit(1);
 }
 
 
