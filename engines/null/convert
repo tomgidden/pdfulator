@@ -1,0 +1,72 @@
+#!/bin/sh
+# The null engine's convert step.
+#
+#   convert <input|-> <output|-> <theme-dir>
+#
+# Emits a minimal valid PDF -- `file(1)` reports "PDF document, version 1.0,
+# 1 pages" -- without a browser, a JS runtime or Docker. What makes it useful
+# as a test engine is that it records *what it was asked to do* in PDF comment
+# lines, so a test can assert the wrapper honoured the contract rather than
+# merely that some file appeared.
+#
+# Comments are the right place for this: a `%` line is ignored by every PDF
+# parser, so the diagnostics ride along without making the file invalid.
+#
+# Deliberately has no dependencies beyond POSIX sh: if this engine fails, the
+# framework is broken, and that must not be confusable with a missing tool.
+set -eu
+
+in=${1:-}
+out=${2:-}
+theme=${3:-}
+
+[ -n "$in" ]  || { echo "null: no input given" >&2;  exit 2; }
+[ -n "$out" ] || { echo "null: no output given" >&2; exit 2; }
+
+# Read the input so that a genuinely unreadable one still fails, as a real
+# engine would. stdin when "-", per the contract.
+if [ "$in" = "-" ]; then
+	src=$(cat)
+	in_desc="<stdin>"
+else
+	[ -f "$in" ] || { echo "null: no such input: $in" >&2; exit 1; }
+	src=$(cat -- "$in")
+	in_desc=$in
+fi
+
+bytes=$(printf '%s' "$src" | wc -c | tr -d ' ')
+
+# The first heading, if there is one -- enough for a test to tell one document
+# from another without parsing markdown.
+title=$(printf '%s\n' "$src" | sed -n 's/^#[[:space:]]*//p' | head -1)
+
+# Strip anything that would break out of a PDF comment line.
+sanitise() { printf '%s' "$1" | tr -d '\n\r' | cut -c1-200; }
+
+emit() {
+	printf '%%PDF-1.0\n'
+	printf '%%%%pdfulator-engine: null\n'
+	printf '%%%%pdfulator-input: %s\n'  "$(sanitise "$in_desc")"
+	printf '%%%%pdfulator-output: %s\n' "$(sanitise "$out")"
+	printf '%%%%pdfulator-theme: %s\n'  "$(sanitise "$theme")"
+	printf '%%%%pdfulator-title: %s\n'  "$(sanitise "$title")"
+	printf '%%%%pdfulator-bytes: %s\n'  "$bytes"
+	printf '%%%%pdfulator-chrome: %s\n' "$(sanitise "${CHROME_PATH:-}")"
+	printf '1 0 obj<</Pages 2 0 R>>endobj\n'
+	printf '2 0 obj<</Kids[3 0 R]/Count 1>>endobj\n'
+	printf '3 0 obj<</MediaBox[0 0 1 1]>>endobj\n'
+	printf 'trailer<</Root 1 0 R>>\n'
+}
+
+if [ "$out" = "-" ]; then
+	emit
+else
+	# Write via a temporary file in the destination directory, then move, so an
+	# interrupted run can't leave a half-written PDF that looks complete. Real
+	# engines should do the same.
+	outdir=$(dirname -- "$out")
+	[ -d "$outdir" ] || mkdir -p -- "$outdir"
+	tmp=$outdir/.pdfulator-null.$$.tmp
+	emit > "$tmp"
+	mv -- "$tmp" "$out"
+fi
