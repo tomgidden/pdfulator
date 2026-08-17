@@ -64,11 +64,18 @@ release:
 # on arrival.
 
 DIST      = pdfulator.tar.gz
-DIST_TOP  = pdfulator.js package.json bun.lock defaults theme
+DIST_TOP  = pdfulator.js package.json bun.lock defaults theme lib engines
 # Expanded for dependency tracking only; the copy uses DIST_TOP so that
 # directories arrive as directories rather than a flattened heap of files.
+#
+# engines/ is pruned of node_modules: an engine's dependencies are as
+# platform-specific as the top-level ones and are installed on arrival from the
+# engine's own bun.lock, which does ship. (Step 5 of the modular plan splits
+# these into per-engine tarballs so a user downloads only the engines they use;
+# until then they ride along in the one tarball.)
 DIST_SRC  = pdfulator.js package.json bun.lock \
-            $(shell find defaults theme -type f)
+            $(shell find defaults theme lib -type f) \
+            $(shell find engines -type f -not -path '*/node_modules/*')
 
 # What `pdfulator --version` reports and `--update` compares against. CI
 # overrides this with the tag being built (VERSION=$(github.ref_name)); a local
@@ -92,6 +99,10 @@ dist: $(DIST)
 $(DIST): pdfulator.sh install.sh $(DIST_SRC)
 	@rm -rf .dist && mkdir -p .dist
 	@cp -R $(DIST_TOP) .dist/
+	@# cp -R brings an engine's installed node_modules with it; those are
+	@# platform-specific and are reinstalled on arrival, exactly as the
+	@# top-level ones are. Pruning after the copy keeps DIST_TOP readable.
+	@find .dist/engines -name node_modules -type d -prune -exec rm -rf {} +
 	@cp pdfulator.sh .dist/pdfulator
 	@cp install.sh .dist/install.sh
 	@chmod +x .dist/pdfulator .dist/install.sh
@@ -127,6 +138,7 @@ test-lib:
 # Argument-handling matrices. These need a CHROME_PATH (or a pinned browser);
 # wrapmatrix additionally needs the tarball, since it installs what it tests.
 test: test-lib $(DIST)
+	sh tests/vivliomatrix.sh
 	bash tests/argmatrix.sh
 	bash tests/wrapmatrix.sh
 	bash tests/uninstallmatrix.sh
