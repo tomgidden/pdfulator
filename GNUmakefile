@@ -135,6 +135,7 @@ test-lib:
 	sh tests/themematrix.sh
 	sh tests/browsermatrix.sh
 	sh tests/watchmatrix.sh
+	sh tests/enginematrix.sh
 
 # Argument-handling matrices. These need a CHROME_PATH (or a pinned browser);
 # wrapmatrix additionally needs the tarball, since it installs what it tests.
