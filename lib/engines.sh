@@ -108,7 +108,11 @@ engine_resolve() {  # engine_resolve [requested]
 
 	if [ -n "$_er_want" ]; then
 		_er_src="--engine"
-	elif [ -s "$ENGINE_CONF" ]; then
+	elif [ -s "$ENGINE_CONF" ] && ! engine_is_internal "$(cat "$ENGINE_CONF")"; then
+		# An internal engine in the pin file is ignored rather than obeyed:
+		# engine_pin refuses to write one, so its presence means a hand-edit or
+		# a file left by an older version, and honouring it would silently turn
+		# every conversion into a blank page.
 		_er_want=$(cat "$ENGINE_CONF")
 		_er_src="the pinned engine"
 	else
@@ -159,8 +163,15 @@ engine_warn_deprecated() {  # engine_warn_deprecated <id>
 
 
 # Pin a choice, so it holds for later runs.
+#
+# Internal engines are used but never pinned. Pinning `null` would be a trap
+# with no way out: every later run would produce a blank PDF, and the listing
+# that ought to explain why hides internal engines, so it would show no engine
+# in use at all. `--engine null` therefore applies to that run only, which is
+# all a test engine is ever wanted for.
 engine_pin() {  # engine_pin <id>
 	engine_exists "$1" || { engines_error "no engine named \"$1\"."; return 1; }
+	engine_is_internal "$1" && return 0
 	mkdir -p -- "$(dirname -- "$ENGINE_CONF")"
 	printf '%s\n' "$1" > "$ENGINE_CONF"
 	return 0
@@ -201,6 +212,21 @@ engines_describe() {
 
 	[ "$_ed_any" = 1 ] || printf 'No engines are installed.\n'
 	[ -n "$_ed_current" ] && printf '\n* = in use\n'
+	return 0
+}
+
+
+# Has every JS engine got its dependencies?
+#
+# Only engines declaring needs_runtime=js are asked about: an engine that needs
+# no runtime has no node_modules to be missing, and treating its absence as
+# "not ready" would send a pandoc-xslt user to install dependencies forever.
+engines_deps_ready() {
+	for _edr in $(engines_list); do
+		engine_needs_runtime "$_edr" || continue
+		[ -f "$ENGINES_DIR/$_edr/package.json" ] || continue
+		[ -d "$ENGINES_DIR/$_edr/node_modules" ] || return 1
+	done
 	return 0
 }
 

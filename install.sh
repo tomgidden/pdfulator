@@ -166,8 +166,12 @@ staging="$tmp/root"
 mkdir -p "$staging"
 tar xzf "$tmp/pdfulator.tar.gz" -C "$staging"
 
-[ -f "$staging/pdfulator.js" ] || {
-	echo "pdfulator: the archive doesn't look right (no pdfulator.js)." >&2
+# What makes an archive look right is the common layer and at least one
+# engine. It used to be pdfulator.js, back when there was exactly one converter
+# and it was the whole application; now the converters are engines, and which
+# of them a release carries is not fixed.
+[ -d "$staging/lib" ] && [ -d "$staging/engines" ] || {
+	echo "pdfulator: the archive doesn't look right (no lib/ or engines/)." >&2
 	exit 1
 }
 
@@ -183,23 +187,33 @@ if [ -d "$PDFULATOR_HOME" ]; then
 	# VERSION is deliberately absent -- the incoming one is the whole point.
 	keeps="bun chromium .browser .runtime"
 
-	# node_modules only if the dependencies haven't changed. The wrapper
-	# installs them when the directory is absent, so carrying a stale tree
-	# across a version bump would leave pdfulator.js failing at import with
-	# nothing to suggest why.
-	old_lock=""
-	[ -f "$PDFULATOR_HOME/bun.lock" ] && old_lock=$(hash_file "$PDFULATOR_HOME/bun.lock")
-	new_lock=""
-	[ -f "$staging/bun.lock" ] && new_lock=$(hash_file "$staging/bun.lock")
-
-	if [ -n "$old_lock" ] && [ "$old_lock" = "$new_lock" ]; then
-		keeps="$keeps node_modules"
-	elif [ -d "$PDFULATOR_HOME/node_modules" ]; then
-		echo "  dependencies changed; they'll be reinstalled on first use" >&2
-	fi
-
 	for keep in $keeps; do
 		[ -e "$PDFULATOR_HOME/$keep" ] && mv "$PDFULATOR_HOME/$keep" "$staging/" 2>/dev/null || true
+	done
+
+	# An engine's node_modules, but only where its dependencies haven't
+	# changed. The wrapper installs them when the directory is absent, so
+	# carrying a stale tree across a version bump would leave the engine
+	# failing at import with nothing to suggest why.
+	#
+	# Per-engine because dependencies are: a release that changes vivlio must
+	# not throw away a pandoc engine's tree, and an engine the user never
+	# installed has nothing to preserve either way.
+	for _eng_dir in "$staging"/engines/*; do
+		[ -d "$_eng_dir" ] || continue
+		_eng=$(basename "$_eng_dir")
+		_old="$PDFULATOR_HOME/engines/$_eng"
+		[ -d "$_old/node_modules" ] || continue
+
+		old_lock=""; new_lock=""
+		[ -f "$_old/bun.lock" ]      && old_lock=$(hash_file "$_old/bun.lock")
+		[ -f "$_eng_dir/bun.lock" ]  && new_lock=$(hash_file "$_eng_dir/bun.lock")
+
+		if [ -n "$old_lock" ] && [ "$old_lock" = "$new_lock" ]; then
+			mv "$_old/node_modules" "$_eng_dir/" 2>/dev/null || true
+		else
+			echo "  $_eng dependencies changed; they'll be reinstalled on first use" >&2
+		fi
 	done
 	rm -rf "$PDFULATOR_HOME"
 fi

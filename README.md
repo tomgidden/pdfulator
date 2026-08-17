@@ -205,10 +205,14 @@ default), plus the wrapper itself in `$PDFULATOR_BIN` (`~/.local/bin`):
 
 | Path | Contents | Size |
 | --- | --- | --- |
-| `pdfulator.js`, `defaults/`, `theme/` | The application | small |
-| `node_modules/` | npm dependencies | ~30MB |
+| `lib/`, `defaults/`, `theme/` | The command's shared layer and assets | small |
+| `engines/<id>/` | One converter each — see `--list-engines` | small |
+| `engines/<id>/node_modules/` | An engine's dependencies, if it has any | ~30MB |
 | `bun/` | Private _bun_, only if you asked for one | ~60MB |
 | `chromium/` | `chrome-headless-shell`, only if you asked for one | ~193MB |
+
+Dependencies are per-engine and installed on first use, so you only pay for
+the engines you actually run.
 
 `pdfulator --uninstall` removes all of it — including the `pdfulator` command
 itself — except files you have added or modified. Your themes and any edited
@@ -221,16 +225,18 @@ Working on pdfulator itself needs [bun](https://bun.sh) and a Chromium-based
 browser:
 
 ```zsh
-bun install
-CHROME_PATH=/path/to/chrome bun run pdfulator.js README.md
+CHROME_PATH=/path/to/chrome ./pdfulator.sh README.md
 ```
+
+The wrapper runs from a checkout as it does when installed, finding `lib/` and
+`engines/` beside itself. An engine's dependencies install on first use.
 
 `--debug` keeps the generated HTML next to the PDF, which is usually what you
 want when adjusting a theme; `--watch` re-renders on every save:
 
 ```zsh
-bun run pdfulator.js --debug --theme ./my_theme README.md
-bun run pdfulator.js --watch .
+./pdfulator.sh --debug --theme ./my_theme README.md
+./pdfulator.sh --watch .
 ```
 
 To build the distributable wrapper from a checkout:

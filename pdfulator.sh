@@ -2,10 +2,20 @@
 # pdfulator — command wrapper.
 #
 # Installed by install.sh as $PDFULATOR_BIN/pdfulator, alongside the
-# application in $PDFULATOR_HOME. This script owns everything that outlives
-# installation: finding or fetching bun, choosing the rendering browser, and
-# uninstalling. Nothing heavyweight happens without being asked for.
+# application in $PDFULATOR_HOME.
 #
+# This is the command, and it is also the common layer: it decides *what* to
+# do, and an engine only converts one document. Job planning, theme
+# resolution, browser discovery, watching and engine selection all live here,
+# in lib/, because they are shared by every engine -- and because they were
+# previously implemented three times over, in three languages, which disagreed.
+#
+# It also owns everything that outlives a conversion: finding or fetching bun,
+# choosing the rendering browser, updating and uninstalling. Nothing heavyweight
+# happens without being asked for.
+#
+#   -e, --engine <id>                    choose an engine (remembered)
+#       --list-engines                   show what's installed
 #   --install                            choose a runtime and browser (asks)
 #   --browser auto|find|install|<path>   choose a browser (remembered)
 #   --install-runtime                    download bun if none is installed
@@ -17,6 +27,38 @@ set -e
 
 PDFULATOR_HOME="${PDFULATOR_HOME:-$HOME/.local/share/pdfulator}"
 PDFULATOR_BIN="${PDFULATOR_BIN:-$HOME/.local/bin}"
+
+# Where the library and the engines live. The same directory as the
+# application, which is $PDFULATOR_HOME once installed -- but not in a
+# checkout, where this script sits beside lib/ instead. Preferring the
+# installed copy keeps `pdfulator` meaning the installed one even when run
+# from a source tree.
+# An explicit $PDFULATOR_DIR wins, which is how a checkout is tested against
+# its own lib/ and engines/ without installing first.
+if [ -z "${PDFULATOR_DIR:-}" ]; then
+	PDFULATOR_DIR="$PDFULATOR_HOME"
+	if [ ! -d "$PDFULATOR_DIR/lib" ]; then
+		PDFULATOR_DIR=$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)
+	fi
+fi
+
+# The common layer. Order matters: paths.sh is the foundation, and jobs.sh and
+# theme.sh both build on it.
+#
+# Sourced rather than duplicated, and sourced *here* rather than per-engine,
+# because this is the layer every engine shares -- job planning, theme
+# resolution, browser discovery and watching are the wrapper's, and an engine
+# only converts. See lib/jobs.sh for why: these were implemented three times
+# over, in three languages, and the three disagreed.
+for _lib in paths jobs theme browser watch engines; do
+	if [ -r "$PDFULATOR_DIR/lib/$_lib.sh" ]; then
+		. "$PDFULATOR_DIR/lib/$_lib.sh"
+	else
+		echo "pdfulator: installation is incomplete: no lib/$_lib.sh in $PDFULATOR_DIR" >&2
+		echo "Reinstall with:  curl -fsSL https://pdfulator.app/get | sh" >&2
+		exit 1
+	fi
+done
 
 STAMP="$PDFULATOR_HOME/.installed"
 MANIFEST="$PDFULATOR_HOME/.manifest"
@@ -121,21 +163,37 @@ list_runtimes() {
 	done
 }
 
-# Run pdfulator.js under whichever runtime was chosen. `bun run` wants the
-# subcommand; node and deno take the script directly (deno additionally needs
-# to be told it may touch the filesystem, network and subprocesses -- it is the
-# only one of the three that sandboxes by default).
-run_js() {
+# (run_js is gone. There is no longer a single "the JS" to run: conversion goes
+# through an engine's convert, and the one remaining JS operation -- fetching a
+# browser -- is install_browser below.)
+
+# Download a private browser, by running the selected engine's installer.
+#
+# This is the one browser operation still in JS: @puppeteer/browsers is a real
+# dependency, unlike the path table that finding a browser needs. It therefore
+# belongs to an engine, and only engines that drive a browser have one.
+#
+# It prints the installed path on stdout and everything else on stderr, so the
+# result is read rather than scraped -- which is the whole reason the old
+# `--list-browsers | awk` arrangement had to go.
+install_browser() {
+	_ib_engine=$(engine_resolve "${engine:-}") || return 1
+	_ib_script="$PDFULATOR_DIR/engines/$_ib_engine/install-browser.js"
+
+	[ -f "$_ib_script" ] || {
+		echo "pdfulator: the $_ib_engine engine cannot download a browser." >&2
+		echo "Install one system-wide, then run 'pdfulator --browser auto'." >&2
+		return 1
+	}
+
+	[ -n "${BUN:-}" ] || BUN=$(find_bun) || true
+	[ -n "${BUN:-}" ] || { bun_needed_message; return 1; }
+
 	case $(basename "$BUN") in
-		bun*)  exec_args="run $PDFULATOR_HOME/pdfulator.js" ;;
-		deno*) exec_args="run -A $PDFULATOR_HOME/pdfulator.js" ;;
-		*)     exec_args="$PDFULATOR_HOME/pdfulator.js" ;;
+		bun*)  PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" run "$_ib_script" ;;
+		deno*) PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" run -A "$_ib_script" ;;
+		*)     PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" "$_ib_script" ;;
 	esac
-	# shellcheck disable=SC2086  # exec_args is ours, and deliberately split
-	if [ "${RUN_JS_EXEC:-0}" = 1 ]; then
-		PDFULATOR_HOME="$PDFULATOR_HOME" exec "$BUN" $exec_args "$@"
-	fi
-	PDFULATOR_HOME="$PDFULATOR_HOME" "$BUN" $exec_args "$@"
 }
 
 # Install the npm dependencies with whichever runtime is in $BUN.
@@ -144,20 +202,35 @@ run_js() {
 # needs a runtime, which may only have arrived moments ago. bun installs from
 # bun.lock; node and deno have no lockfile here, so they get npm's resolution of
 # the same package.json -- which is why bun is the runtime we manage.
+#
+# Per-engine now, and only for engines that declare needs_runtime=js. An engine
+# owns its dependencies because they are what make it that engine -- the viewer
+# and puppeteer-core are vivlio's, and pandoc-xslt will have none of them. A
+# user who only ever runs pandoc-xslt installs nothing here.
 install_deps() {
-	case $(basename "$BUN") in
-		bun*)
-			(cd "$PDFULATOR_HOME" && "$BUN" install --frozen-lockfile)
-			;;
-		*)
-			command -v npm >/dev/null 2>&1 || {
-				echo "pdfulator: npm is needed to install dependencies for $(basename "$BUN")." >&2
-				echo "Run 'pdfulator --install' and choose bun instead." >&2
-				return 1
-			}
-			(cd "$PDFULATOR_HOME" && npm install --no-audit --no-fund)
-			;;
-	esac
+	_id_status=0
+	for _id_engine in $(engines_list); do
+		engine_needs_runtime "$_id_engine" || continue
+
+		_id_dir="$PDFULATOR_DIR/engines/$_id_engine"
+		[ -f "$_id_dir/package.json" ] || continue
+
+		echo "Installing dependencies for the $_id_engine engine..." >&2
+		case $(basename "$BUN") in
+			bun*)
+				(cd "$_id_dir" && "$BUN" install --frozen-lockfile) || _id_status=1
+				;;
+			*)
+				command -v npm >/dev/null 2>&1 || {
+					echo "pdfulator: npm is needed to install dependencies for $(basename "$BUN")." >&2
+					echo "Run 'pdfulator --install' and choose bun instead." >&2
+					return 1
+				}
+				(cd "$_id_dir" && npm install --no-audit --no-fund) || _id_status=1
+				;;
+		esac
+	done
+	return $_id_status
 }
 
 # What to say when there's no bun and we haven't been told to fetch one.
@@ -247,7 +320,11 @@ version_cmp() {  # version_cmp <a> <b>
 # The application must be where install.sh put it. If someone has copied this
 # script somewhere without the rest, say so plainly rather than failing later
 # with a confusing error from bun.
-if [ ! -f "$PDFULATOR_HOME/pdfulator.js" ]; then
+#
+# engines/ is the thing to check now rather than pdfulator.js: an install with
+# no engines can do nothing at all, whereas the old single script has been
+# replaced by as many converters as the user chose to take.
+if [ ! -d "$PDFULATOR_DIR/engines" ]; then
 	echo "pdfulator: no installation found at $PDFULATOR_HOME" >&2
 	echo "" >&2
 	echo "Install it with:" >&2
@@ -280,6 +357,12 @@ quote() { printf '%s' "$1" | sed "s/'/'\\\\''/g; s/^/'/; s/\$/'/"; }
 
 args=""            # pass-through arguments, shell-quoted
 browser=""         # --browser value, if given
+engine=""          # --engine value, if given
+list_engines=0     # --list-engines seen
+theme=""           # --theme value, if given
+watch=0            # --watch seen
+verbose=0          # --verbose seen
+debug=0            # --debug seen
 want_runtime=0     # --install-runtime seen
 command=""         # a wrapper subcommand: uninstall | setup-status | update | ...
 expect=""          # non-empty while consuming a flag's value
@@ -292,6 +375,8 @@ for arg in "$@"; do
 	if [ -n "$expect" ]; then
 		case $expect in
 			browser)     browser=$arg ;;
+			engine)      engine=$arg ;;
+			theme)       theme=$arg ;;
 			passthrough) args="$args $(quote "$arg")" ;;
 		esac
 		expect=""
@@ -321,8 +406,24 @@ for arg in "$@"; do
 		--browser|-b)       expect=browser ;;
 		--browser=*)        browser=${arg#--browser=} ;;
 
-		# Pass-through flags taking a value: copy the flag now, the value next.
-		-t|--theme)         args="$args $(quote "$arg")"; expect=passthrough ;;
+		# The engine is the wrapper's business, not the engine's: it decides
+		# which one runs, so the flag never reaches one.
+		--engine|-e)        expect=engine ;;
+		--engine=*)         engine=${arg#--engine=} ;;
+		--list-engines)     list_engines=1 ;;
+
+		# Theme resolution is the wrapper's now (lib/theme.sh): engines are
+		# handed a directory, never a name, because a container engine's
+		# filesystem is not the user's and the lookup has to happen out here.
+		-t|--theme)         expect=theme ;;
+		--theme=*)          theme=${arg#--theme=} ;;
+
+		# Flags the wrapper acts on rather than forwards. Watching and
+		# verbosity belong to the layer that plans jobs, not to the one that
+		# converts a single document.
+		-w|--watch)         watch=1 ;;
+		-v|--verbose)       verbose=1 ;;
+		-d|--debug)         debug=1 ;;
 
 		*)                  args="$args $(quote "$arg")" ;;
 	esac
@@ -331,7 +432,9 @@ done
 if [ -n "$expect" ]; then
 	case $expect in
 		browser)     echo "pdfulator: --browser needs auto, find, install, or a path" >&2 ;;
-		passthrough) echo "pdfulator: --theme needs a name or path" >&2 ;;
+		engine)      echo "pdfulator: --engine needs an engine id (see --list-engines)" >&2 ;;
+		theme)       echo "pdfulator: --theme needs a name or path" >&2 ;;
+		passthrough) echo "pdfulator: that flag needs a value" >&2 ;;
 	esac
 	exit 1
 fi
@@ -445,10 +548,11 @@ if [ "$command" = "install" ]; then
 	# install_deps and run_js both read $BUN, so adopt the choice now.
 	BUN=$RUNTIME
 
-	# Dependencies, now that there's a runtime to install them with. This has to
-	# happen before the browser question, because listing browsers means running
-	# pdfulator.js, which needs its imports.
-	if [ ! -d "$PDFULATOR_HOME/node_modules" ]; then
+	# Dependencies, now that there's a runtime to install them with. Still
+	# before the browser question, because *downloading* a browser runs the
+	# engine's installer, which needs its imports. (Listing browsers no longer
+	# does: that is lib/browser.sh, and needs nothing.)
+	if ! engines_deps_ready; then
 		echo "Installing dependencies..." >&3
 		install_deps >&2 || {
 			echo "pdfulator: could not install dependencies." >&2
@@ -461,8 +565,7 @@ if [ "$command" = "install" ]; then
 	if [ -s "$BROWSER_CONF" ]; then
 		echo "Browser: $(cat "$BROWSER_CONF")  (--browser to change)" >&3
 	else
-		browsers=$(run_js --list-browsers 2>&1 |
-			awk '/^  \//{print substr($0,3)}')
+		browsers=$(browser_list_paths)
 
 		echo "Browsers found:" >&3
 		if [ -n "$browsers" ]; then
@@ -481,9 +584,7 @@ if [ "$command" = "install" ]; then
 		ask "Choose [$default_choice]: " "$default_choice"
 
 		if [ "$REPLY_VALUE" = 0 ]; then
-			run_js --install-browser >&2 || exit 1
-			chosen=$(run_js --list-browsers 2>&1 |
-				awk '/^  \//{print substr($0,3); exit}')
+			chosen=$(install_browser) || exit 1
 		else
 			chosen=$(printf '%s\n' "$browsers" | sed -n "${REPLY_VALUE}p")
 		fi
@@ -683,7 +784,7 @@ if [ "$command" = "setup-status" ]; then
 
 	# Not a decision the user has to make -- just something that will happen on
 	# the first conversion, so it isn't a surprise when it does.
-	[ -d "$PDFULATOR_HOME/node_modules" ] ||
+	engines_deps_ready ||
 		echo "Dependencies will be installed on first use." >&2
 
 	[ "$need" = 0 ] && echo "Ready to convert." >&2
@@ -725,6 +826,9 @@ if [ "$command" = "uninstall" ]; then
 	# chromium/ and bun/ are things we downloaded, so all three go
 	# unconditionally. A system-wide bun is untouched -- we only ever wrote here.
 	rm -rf "$PDFULATOR_HOME/node_modules" "$PDFULATOR_HOME/chromium" "$BUN_HOME"
+	# Engines keep their own node_modules now, so removing the top-level one
+	# is no longer enough to leave a clean tree.
+	rm -rf "$PDFULATOR_HOME"/engines/*/node_modules
 	rm -f "$STAMP" "$MANIFEST" "$BROWSER_CONF" "$RUNTIME_CONF"
 
 	# Prune directories that are now empty. -depth so children are considered
@@ -789,32 +893,18 @@ if [ -z "${BUN:-}" ] && [ -s "$RUNTIME_CONF" ]; then
 	fi
 fi
 
-if [ -z "${BUN:-}" ]; then
-	BUN=$(find_bun) || {
-		if [ "$want_runtime" = 1 ]; then
-			install_bun || exit 1
-			BUN=$BUN_PRIVATE
-		else
-			bun_needed_message
-			exit 1
-		fi
-	}
+if [ -z "${BUN:-}" ] && [ "$want_runtime" = 1 ]; then
+	BUN=$(find_bun) || { install_bun || exit 1; BUN=$BUN_PRIVATE; }
 fi
 
-# npm dependencies. install.sh deliberately doesn't run this -- node_modules is
-# platform-specific and needs a runtime, which may only have arrived just now.
-# It's cheap to check and only ever runs once.
+# Finding a runtime, and installing dependencies with it, is deferred to
+# dispatch -- where the selected engine's needs_runtime is known.
 #
-# bun installs from bun.lock; node and deno have no such lockfile here, so they
-# get npm's resolution of the same package.json. That's why bun is the runtime
-# we manage and the one to prefer.
-if [ ! -d "$PDFULATOR_HOME/node_modules" ]; then
-	echo "Installing dependencies..." >&2
-	install_deps >&2 || {
-		echo "pdfulator: dependency installation failed." >&2
-		exit 1
-	}
-fi
+# It used to happen unconditionally, here. That was harmless when every
+# conversion ran the same JS, but now it would demand bun of a pandoc-xslt user
+# who has no use for it, and install an engine's dependencies to answer
+# --list-engines, which reads text files. Nothing heavyweight without being
+# asked for, and nothing asked for on behalf of an engine that doesn't want it.
 
 # --install-runtime on its own is just setup: nothing left to convert.
 if [ "$want_runtime" = 1 ] && [ $# -eq 0 ]; then
@@ -864,9 +954,9 @@ case $browser in
 		;;
 
 	auto)
-		# Detect and pin in one step: pdfulator.js reports candidates best-first,
-		# so the first path it lists is the one to take.
-		found=$(run_js --list-browsers 2>&1 | awk '/^  \//{print substr($0,3); exit}')
+		# Detect and pin in one step. The list is in preference order, so the
+		# first entry is the one to take.
+		found=$(browser_best) || found=""
 		if [ -z "$found" ]; then
 			echo "pdfulator: no browser found to pin." >&2
 			echo "Try --browser install, or install one system-wide." >&2
@@ -878,20 +968,37 @@ case $browser in
 
 	find)
 		# Show everything and pin nothing -- the user picks.
-		run_js --list-browsers; exit $?
+		#
+		# The source column is why this is worth printing rather than just
+		# listing paths: an entry found on $PATH deserves more suspicion than
+		# one at a known location, since anything named `chromium` matches.
+		if [ -z "$(browser_list)" ]; then
+			echo "No Chromium-family browsers found." >&2
+			echo "Try --browser install to fetch a private one." >&2
+			exit 1
+		fi
+		browser_list | while IFS='	' read -r p src; do
+			printf '  %s\n      (%s)\n' "$p" "$src"
+		done
+		exit 0
 		;;
 
 	install)
-		# Download, then pin whatever it installed.
-		run_js --install-browser >&2 || exit $?
-		found=$(run_js --list-browsers 2>&1 | awk '/^  \//{print substr($0,3); exit}')
+		# Download, then pin what it installed -- read from its stdout rather
+		# than found by searching afterwards.
+		found=$(install_browser) || exit $?
 		[ -n "$found" ] || { echo "pdfulator: install succeeded but no browser found." >&2; exit 1; }
 		CHROME_PATH=$found
 		pin_browser "$found"
 		;;
 
 	*)
-		command -v "$browser" >/dev/null 2>&1 || [ -x "$browser" ] || {
+		# A .app bundle is the obvious thing to name on macOS, and is not
+		# itself runnable, so it resolves to the binary inside.
+		if resolved=$(browser_resolve_bundle "$browser" 2>/dev/null); then
+			browser=$resolved
+		fi
+		browser_is_usable "$browser" || {
 			echo "pdfulator: not an executable browser: $browser" >&2
 			exit 1
 		}
@@ -912,30 +1019,148 @@ export PDFULATOR_BUNDLED
 
 # ("$@" was already reinstated by the parser near the top.)
 
-# --help comes from pdfulator.js, which knows nothing about the bundle, so
-# append the options only the wrapper implements.
+# Help is the wrapper's now. It used to come from pdfulator.js with the
+# bundle's own options appended, which meant the two halves of one help text
+# were written in two languages and could disagree -- and once engines exist
+# there is no single "the JS" to ask.
 case " $* " in
 	*" --help "*|*" -h "*)
-		run_js "$@" || true
-		echo "Bundle options:" >&2
-		echo "      --install             choose a runtime and browser (asks)" >&2
-		echo "  -b, --browser auto        detect a browser and remember it" >&2
-		echo "      --browser find        list browsers found on this machine" >&2
-		echo "      --browser install     download a private browser (~96MB)" >&2
-		echo "      --browser <path>      use this browser (remembered)" >&2
-		echo "      --install-runtime     download bun if it isn't installed" >&2
-		echo "      --update              install a newer release, if there is one" >&2
-		echo "      --update --check      exit 0 if an update is available" >&2
-		echo "      --update --yes        update without asking" >&2
-		echo "      --version             report the installed version" >&2
-		echo "      --uninstall           remove pdfulator (keeps your themes)" >&2
+		cat >&2 <<'EOF'
+pdfulator — Markdown to PDF
+
+Usage:
+  pdfulator [options] input.md [output.pdf]   convert one file
+  pdfulator [options] dir/ [outdir/]          convert every *.md in a directory
+  pdfulator [options] -                       stdin to stdout
+
+Options:
+  -t, --theme <name|path>   theme to use
+  -e, --engine <id>         engine to use (remembered)
+      --list-engines        show the installed engines
+  -w, --watch               convert, then again whenever a source changes
+  -v, --verbose             say what is happening
+  -d, --debug               keep intermediate files
+  -h, --help                this
+
+Setup:
+      --install             choose a runtime and browser (asks)
+  -b, --browser auto        detect a browser and remember it
+      --browser find        list browsers found on this machine
+      --browser install     download a private browser (~193MB)
+      --browser <path>      use this browser (remembered)
+      --install-runtime     download bun if it isn't installed
+      --setup-status        report what is still needed
+      --update              install a newer release, if there is one
+      --version             report the installed version
+      --uninstall           remove pdfulator (keeps your themes)
+EOF
 		exit 0
 		;;
 esac
 
-# A bare `--browser <path>` with nothing to convert is just configuration.
-[ $# -eq 0 ] && [ -n "$browser" ] && exit 0
+if [ "$list_engines" = 1 ]; then
+	engines_describe
+	exit 0
+fi
+
+# A bare `--browser <path>` or `--engine <id>` with nothing to convert is just
+# configuration.
+[ $# -eq 0 ] && { [ -n "$browser" ] || [ -n "$engine" ]; } && exit 0
 
 
-# Replace this shell: pdfulator.js owns the exit status and the signals.
-RUN_JS_EXEC=1 run_js "$@"
+# --- Dispatch ----------------------------------------------------------------
+#
+# The shape this whole refactor was for: plan the jobs, then hand each one to
+# an engine. Everything above settled *what* to do; the engine only converts.
+
+ENGINE=$(engine_resolve "$engine") || exit 1
+[ -n "$engine" ] && { engine_pin "$engine" || exit 1; }
+engine_warn_deprecated "$ENGINE"
+
+THEME_DIR=$(theme_resolve "$theme") || exit 1
+[ "$verbose" = 1 ] && echo "Theme: $THEME_DIR" >&2
+
+# Only what this engine actually declares. A pandoc-xslt user never meets bun,
+# and never pays for a browser search -- which is the point of putting the
+# requirements in engine.conf rather than assuming every engine is vivlio.
+if engine_needs_runtime "$ENGINE"; then
+	[ -n "${BUN:-}" ] || BUN=$(find_bun) || true
+	[ -n "${BUN:-}" ] || { bun_needed_message; exit 1; }
+	PDFULATOR_RUNTIME=$BUN
+	export PDFULATOR_RUNTIME
+	[ "$verbose" = 1 ] && echo "Runtime: $PDFULATOR_RUNTIME" >&2
+
+	# The engine's dependencies, now that there is a runtime to install them
+	# with. install.sh deliberately doesn't: node_modules is platform-specific
+	# and needs a runtime, which may only have arrived moments ago.
+	if ! engines_deps_ready; then
+		echo "Installing dependencies..." >&2
+		install_deps >&2 || {
+			echo "pdfulator: dependency installation failed." >&2
+			exit 1
+		}
+	fi
+fi
+
+if engine_needs_browser "$ENGINE" && [ -z "${CHROME_PATH:-}" ]; then
+	echo "pdfulator: no browser chosen yet." >&2
+	echo "Run 'pdfulator --browser auto' to use one you already have," >&2
+	echo "or 'pdfulator --browser install' to fetch a private one." >&2
+	exit 1
+fi
+
+PDFULATOR_VERBOSE=$([ "$verbose" = 1 ] && echo 1 || echo "")
+PDFULATOR_DEBUG=$([ "$debug" = 1 ] && echo 1 || echo "")
+export PDFULATOR_VERBOSE PDFULATOR_DEBUG PDFULATOR_DIR
+
+# Plan, then convert. Reinstated "$@" holds only the positional arguments by
+# now, every flag having been consumed above.
+run_jobs() {
+	jobs_plan "$@" || return 1
+
+	_rj_status=0
+	_rj_list=$(jobs_each)
+	[ -n "$_rj_list" ] || return 0
+
+	# A `while read` on the right of a pipe runs in a subshell, so a failure
+	# count set inside one is lost -- the same trap lib/browser.sh hit. A
+	# here-document keeps the loop in this shell, which is what lets one
+	# failed document set the exit status without stopping the others.
+	while IFS='	' read -r _rj_in _rj_out; do
+		[ -n "$_rj_in" ] || continue
+		[ "$verbose" = 1 ] && echo "Converting $_rj_in" >&2
+		engine_convert "$ENGINE" "$_rj_in" "$_rj_out" "$THEME_DIR" || _rj_status=1
+	done <<-EOF
+	$_rj_list
+	EOF
+
+	return $_rj_status
+}
+
+# stdin is a single job that no planning applies to: there is no file to
+# classify, no directory to scan and nothing to refuse to overwrite.
+case " $* " in
+	*" - "*)
+		engine_convert "$ENGINE" - - "$THEME_DIR"
+		exit $?
+		;;
+esac
+
+if [ "$watch" = 1 ]; then
+	# Watch is directory-only: watching one file and rewriting one PDF is what
+	# `--watch dir/` already does for a directory of one.
+	_w_dir=${1:-$PWD}
+	[ -d "$_w_dir" ] || {
+		echo "pdfulator: --watch needs a directory, not $_w_dir" >&2
+		exit 1
+	}
+
+	watch_on_change() { run_jobs "$@" || true; }
+
+	run_jobs "$@" || true
+	echo "Watching $_w_dir for changes... (^C to stop)" >&2
+	watch_dir "$_w_dir"
+	exit 0
+fi
+
+run_jobs "$@"

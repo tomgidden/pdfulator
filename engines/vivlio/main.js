@@ -372,10 +372,17 @@ async function readInput(input) {
 async function convert(input, output, themeDir, opts) {
   const mdSource = await readInput(input);
 
-  if (!mdSource.trim()) {
-    console.error(input === '-'
-      ? 'Error: empty input on stdin'
-      : `Error: empty input: ${input}`);
+  // Empty stdin is an error; an empty *file* is not.
+  //
+  // The asymmetry is deliberate and predates this refactor. Nothing on stdin
+  // means the pipe feeding us produced nothing, which is a failure worth
+  // reporting -- writing a blank PDF would hide it. An empty file, by
+  // contrast, is a document someone has started and not yet written, and
+  // `pdfulator .` over a directory containing one should render it blank
+  // rather than abort the whole batch. tests/argmatrix.sh has an empty.md
+  // fixture for exactly this case.
+  if (input === '-' && !mdSource.trim()) {
+    console.error('Error: empty input on stdin');
     process.exit(1);
   }
 

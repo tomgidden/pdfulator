@@ -121,11 +121,19 @@ check "no output when input is missing" "absent" \
 check "and a non-zero exit" "yes" \
       "$("$ENGINE" nosuchfile.md g2.pdf "$THEME" >/dev/null 2>&1 || echo yes)"
 
+# An empty *file* renders blank rather than failing: it is a document someone
+# has started and not yet written, and `pdfulator dir/` over a directory
+# containing one should not abort the whole batch. Empty *stdin* is the
+# opposite -- it means the pipe produced nothing, which a blank PDF would hide.
 fixture
 : > empty.md
 "$ENGINE" empty.md empty-out.pdf "$THEME" >/dev/null 2>&1
-check "empty input is refused" "absent" \
-      "$([ -e empty-out.pdf ] && echo present || echo absent)"
+check "an empty file renders blank" "yes" \
+      "$(is_pdf empty-out.pdf && echo yes || echo no)"
+
+fixture
+check "empty stdin is refused" "yes" \
+      "$("$ENGINE" - - "$THEME" < /dev/null >/dev/null 2>&1 || echo yes)"
 
 fixture
 "$ENGINE" in.md out.pdf "$BASE/no-such-theme" >/dev/null 2>&1
