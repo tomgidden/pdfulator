@@ -20,11 +20,13 @@ PDFS = $(patsubst %.md,%.pdf,$(wildcard *.md))
 
 all: $(PDFS)
 
+# Through the wrapper, not an engine: the wrapper is what plans jobs and
+# resolves themes, so `make foo.pdf` and `pdfulator foo.md` are the same path.
 %.pdf: %.md
-	bun run pdfulator.js $(SWITCHES) $< $@
+	./pdfulator.sh $(SWITCHES) $< $@
 
 watch:
-	bun run pdfulator.js --watch $(SWITCHES) .
+	./pdfulator.sh --watch $(SWITCHES) .
 
 # Docker conversion
 
@@ -64,7 +66,7 @@ release:
 # on arrival.
 
 DIST      = pdfulator.tar.gz
-DIST_TOP  = pdfulator.js package.json bun.lock defaults theme lib engines
+DIST_TOP  = defaults theme lib engines
 # Expanded for dependency tracking only; the copy uses DIST_TOP so that
 # directories arrive as directories rather than a flattened heap of files.
 #
@@ -73,8 +75,7 @@ DIST_TOP  = pdfulator.js package.json bun.lock defaults theme lib engines
 # engine's own bun.lock, which does ship. (Step 5 of the modular plan splits
 # these into per-engine tarballs so a user downloads only the engines they use;
 # until then they ride along in the one tarball.)
-DIST_SRC  = pdfulator.js package.json bun.lock \
-            $(shell find defaults theme lib -type f) \
+DIST_SRC  = $(shell find defaults theme lib -type f) \
             $(shell find engines -type f -not -path '*/node_modules/*')
 
 # What `pdfulator --version` reports and `--update` compares against. CI
@@ -122,9 +123,6 @@ $(DIST).sha256: $(DIST)
 # and all, which is what makes --uninstall work afterwards.
 install-local: $(DIST) $(DIST).sha256
 	PDFULATOR_TARBALL=$(abspath $(DIST)) ./install.sh
-
-bun.lock: package.json
-	bun install
 
 # The common layer's matrices: POSIX sh, no browser, no runtime, no tarball, a
 # second or two all told. Run with `sh` rather than `bash` deliberately -- they

@@ -68,7 +68,7 @@ fresh
 echo '/* mine */' >> "$PDFULATOR_HOME/theme/print.css"
 out=$("$PDFULATOR_BIN/pdfulator" --uninstall 2>&1)
 want "edited file"           exists "$PDFULATOR_HOME/theme/print.css"
-want "untouched shipped file" gone  "$PDFULATOR_HOME/pdfulator.js"
+want "untouched shipped file" gone  "$PDFULATOR_HOME/lib/jobs.sh"
 check_message "$out"
 
 echo

@@ -18,19 +18,30 @@ RUN apt-get update \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV CHROME_PATH=/usr/bin/chromium
 
-# Install npm dependencies
+# The engine's dependencies, not the distribution's: an engine owns what makes
+# it that engine, and this image is the vivlio engine plus a browser.
 WORKDIR /app
-COPY package.json ./
+COPY engines/vivlio/package.json engines/vivlio/bun.lock ./
 RUN bun install --frozen-lockfile
 
-# Copy assets and script
+# Shared assets, then the engine itself. defaults/ and theme/ sit above the
+# engine because every engine renders the same document; $PDFULATOR_DEFAULTS
+# is what points main.js at them from here.
 COPY defaults ./defaults
 COPY theme    ./theme
-COPY pdfulator.js ./
+COPY engines/vivlio/main.js ./
+
+ENV PDFULATOR_DEFAULTS=/app/defaults
 
 # Input directory (mount user files here)
 RUN mkdir /in && chown bun:bun /in
 
 USER bun
 
-ENTRYPOINT ["bun", "run", "/app/pdfulator.js"]
+# The engine contract, not the old CLI: <input|-> <output|-> <theme-dir>. The
+# default is stdin to stdout with the built-in theme, which is what
+#   docker run --rm --init -i tomgidden/pdfulator < in.md > out.pdf
+# needs; step 6 of the modular plan replaces this with the vivlio-docker
+# engine's own entrypoint, which also accepts mounted directories.
+ENTRYPOINT ["bun", "run", "/app/main.js"]
+CMD ["-", "-", "/app/theme"]

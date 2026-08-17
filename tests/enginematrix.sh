@@ -139,6 +139,19 @@ check "and says so"               "1" "$(printf '%s' "$ERRMSG" | grep -c 'no eng
 setup
 check "an internal engine is selectable" "null" "$(engine_resolve null)"
 
+# ...and never sticks. Pinning null would be a trap with no way out: every
+# later run would produce a blank PDF, and --list-engines hides internal
+# engines, so it would show nothing in use to explain why.
+setup
+engine_pin null
+check "an internal engine is not pinned" "vivlio" "$(engine_resolve)"
+
+# The same reasoning applied to a pin file that already names one, whether
+# hand-edited or left by an older version.
+setup
+mkdir -p "$(dirname "$ENGINE_CONF")" && printf 'null\n' > "$ENGINE_CONF"
+check "an internal pin is ignored" "vivlio" "$(engine_resolve)"
+
 
 echo "============ PINNING ============"
 setup

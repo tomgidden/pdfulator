@@ -6,12 +6,30 @@ S=${TMPDIR:-/tmp}/pdfulator-wrapmatrix
 W=$S/wrap
 FAIL=0
 
+# A browser, detected rather than assumed. This used to be a hardcoded
+# /Applications path, which fails on any machine where Chrome is installed per
+# user (~/Applications) rather than system-wide -- and did so silently, as a
+# conversion that "should have worked". lib/browser.sh is the same detection
+# the wrapper itself uses.
+. "$REPO/lib/paths.sh"
+. "$REPO/lib/browser.sh"
+export CHROME_PATH="${CHROME_PATH:-$(browser_best 2>/dev/null)}"
+if [ -z "$CHROME_PATH" ]; then
+	echo "SKIP: no Chromium-family browser found; wrapmatrix needs one."
+	exit 0
+fi
+
 fixture() {
 	rm -rf "$W"; mkdir -p "$W/home" "$W/bin" "$W/work"
 	tar xzf $REPO/pdfulator.tar.gz -C "$W/home"
 	cp $REPO/pdfulator.sh "$W/bin/pdfulator"
 	chmod +x "$W/bin/pdfulator"
+	# The tarball ships no node_modules (they are platform-specific and
+	# installed on arrival), so the checkout's are borrowed rather than
+	# installed afresh per case. Per-engine now, since that is where an
+	# engine's dependencies live.
 	ln -s $REPO/node_modules "$W/home/node_modules" 2>/dev/null
+	ln -s $REPO/engines/vivlio/node_modules "$W/home/engines/vivlio/node_modules" 2>/dev/null
 	printf '# T\n\nBody.\n' > "$W/work/t.md"
 	mkdir -p "$W/theme-b" && : > "$W/theme-b/print.css"
 	cd "$W/work" || exit 1
@@ -23,7 +41,6 @@ run() {
 	fixture
 	local out status
 	out=$(PDFULATOR_HOME="$W/home" PDFULATOR_BIN="$W/bin" \
-	      CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
 	      "$W/bin/pdfulator" "$@" 2>&1); status=$?
 	local stray
 	stray=$(ls -A "$W/work" | grep -v '^t\.md$' | grep -v '\.pdf$' | tr '\n' ' ')
