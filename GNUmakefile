@@ -115,9 +115,17 @@ install-local: $(DIST) $(DIST).sha256
 bun.lock: package.json
 	bun install
 
-# Argument-handling matrices. Both need a CHROME_PATH (or a pinned browser);
+# The common layer's matrices: POSIX sh, no browser, no runtime, no tarball, a
+# second or two all told. Run with `sh` rather than `bash` deliberately -- they
+# test code that ships to whatever /bin/sh a user has, and this project once
+# shipped a dash bug precisely by testing only under bash on macOS.
+test-lib:
+	sh tests/planmatrix.sh
+	sh tests/themematrix.sh
+
+# Argument-handling matrices. These need a CHROME_PATH (or a pinned browser);
 # wrapmatrix additionally needs the tarball, since it installs what it tests.
-test: $(DIST)
+test: test-lib $(DIST)
 	bash tests/argmatrix.sh
 	bash tests/wrapmatrix.sh
 	bash tests/uninstallmatrix.sh
@@ -127,5 +135,5 @@ test: $(DIST)
 clean:
 	rm -rf .dist .version $(DIST) $(DIST).sha256
 
-.PHONY: all watch docker-watch build release dist install-local test clean
+.PHONY: all watch docker-watch build release dist install-local test test-lib clean
 
