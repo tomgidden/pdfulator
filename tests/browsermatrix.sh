@@ -53,6 +53,44 @@ browser_candidate_paths() { [ -n "$CANDIDATES" ] && printf '%s\n' "$CANDIDATES";
 browser_path_names()      { [ -n "$PATH_NAMES" ] && printf '%s\n' "$PATH_NAMES"; return 0; }
 
 
+echo "============ SET -E ============"
+# The wrapper runs with `set -e`, so every one of these must survive it.
+#
+# This is not hypothetical. Three separate `set -e` traps in this file made
+# browser_gather abort mid-listing, and the symptom was not an error: it was
+# `--install` reporting "Browsers found: (none)" on a machine with two, with
+# nothing on stderr to say why. The functions were all fine when tested
+# without `set -e`, which is exactly why this section exists.
+#
+# The traps, all the same shape -- a command whose failure is *normal* left
+# where the shell reads its status:
+#   * `x=$(f)` where f may fail: the assignment takes f's status.
+#   * `[ ... ] && cmd` as a non-final statement: a false test is a failure.
+#   * a loop whose last iteration ends in a false test: the loop takes it.
+#
+# Run in a child shell because `set -e` cannot be scoped within one.
+sete() {  # sete <description> <shell-snippet>
+	if out=$(sh -c "set -e
+		. '$LIB/paths.sh'; . '$LIB/browser.sh'
+		$2" 2>&1); then
+		printf 'ok    %s\n' "$1"
+	else
+		printf 'FAIL  %s (aborted under set -e)\n        %s\n' "$1" "$out"
+		FAIL=1
+	fi
+}
+
+# With no managed browser -- the normal case, and the one that broke.
+sete "browser_gather survives set -e"     'PDFULATOR_HOME=/nonexistent; x=$(browser_gather)'
+sete "browser_list survives set -e"       'PDFULATOR_HOME=/nonexistent; x=$(browser_list)'
+sete "browser_list_paths survives set -e" 'PDFULATOR_HOME=/nonexistent; x=$(browser_list_paths)'
+sete "browser_find_managed, guarded"      'PDFULATOR_HOME=/nonexistent; x=$(browser_find_managed) || x=""'
+sete "browser_candidate_paths survives"   'x=$(browser_candidate_paths)'
+# browser_best legitimately fails when there is nothing to find, so a caller
+# must guard it -- but it must fail *there*, not abort the shell first.
+sete "browser_best, guarded"              'x=$(browser_best) || x=""'
+
+
 echo "============ EMPTY ============"
 fixture
 CANDIDATES=""; PATH_NAMES=""

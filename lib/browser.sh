@@ -98,25 +98,31 @@ browser_candidate_paths() {  # browser_candidate_paths
 			# they are what a desktop user most likely has. Each root is only
 			# offered if the variable is actually set, since an unset one would
 			# otherwise produce candidates rooted at the filesystem root.
-			[ -n "${LOCALAPPDATA:-}" ] && cat <<-EOF
-			$LOCALAPPDATA\\Google\\Chrome\\Application\\chrome.exe
-			$LOCALAPPDATA\\Chromium\\Application\\chrome.exe
-			$LOCALAPPDATA\\Microsoft\\Edge\\Application\\msedge.exe
-			$LOCALAPPDATA\\BraveSoftware\\Brave-Browser\\Application\\brave.exe
-			EOF
-			[ -n "${PROGRAMFILES:-}" ] && cat <<-EOF
-			$PROGRAMFILES\\Google\\Chrome\\Application\\chrome.exe
-			$PROGRAMFILES\\Microsoft\\Edge\\Application\\msedge.exe
-			$PROGRAMFILES\\BraveSoftware\\Brave-Browser\\Application\\brave.exe
-			EOF
+			if [ -n "${LOCALAPPDATA:-}" ]; then
+				cat <<-EOF
+				$LOCALAPPDATA\\Google\\Chrome\\Application\\chrome.exe
+				$LOCALAPPDATA\\Chromium\\Application\\chrome.exe
+				$LOCALAPPDATA\\Microsoft\\Edge\\Application\\msedge.exe
+				$LOCALAPPDATA\\BraveSoftware\\Brave-Browser\\Application\\brave.exe
+				EOF
+			fi
+			if [ -n "${PROGRAMFILES:-}" ]; then
+				cat <<-EOF
+				$PROGRAMFILES\\Google\\Chrome\\Application\\chrome.exe
+				$PROGRAMFILES\\Microsoft\\Edge\\Application\\msedge.exe
+				$PROGRAMFILES\\BraveSoftware\\Brave-Browser\\Application\\brave.exe
+				EOF
+			fi
 			# `${PROGRAMFILES(X86)}` is not a portable shell variable name --
 			# the parentheses are not valid in an sh identifier -- so it is
 			# read from the environment instead.
 			_bc_x86=$(env | sed -n 's/^PROGRAMFILES(X86)=//p' | head -1)
-			[ -n "$_bc_x86" ] && cat <<-EOF
-			$_bc_x86\\Google\\Chrome\\Application\\chrome.exe
-			$_bc_x86\\Microsoft\\Edge\\Application\\msedge.exe
-			EOF
+			if [ -n "$_bc_x86" ]; then
+				cat <<-EOF
+				$_bc_x86\\Google\\Chrome\\Application\\chrome.exe
+				$_bc_x86\\Microsoft\\Edge\\Application\\msedge.exe
+				EOF
+			fi
 			;;
 	esac
 	return 0
@@ -198,25 +204,43 @@ browser_list() {
 	$_bl_all
 	EOF
 
-	[ -n "$_bl_out" ] && printf '%s' "$_bl_out"
+	if [ -n "$_bl_out" ]; then printf '%s' "$_bl_out"; fi
 	return 0
 }
 
 
 # The raw stream, in preference order and with duplicates still in it.
 browser_gather() {
-	_bg_managed=$(browser_find_managed) &&
+	# `|| _bg_managed=""`, not `x=$(...) && ...`. In an assignment the command
+	# substitution's status *is* the assignment's status, so under `set -e` --
+	# which the wrapper runs with -- a failure aborts the caller outright,
+	# before the && is ever consulted. Having no managed browser is the normal
+	# case, so that made the whole listing vanish: `--install` reported
+	# "Browsers found: (none)" on a machine with two.
+	#
+	# This is the trap the project's shell-portability notes already record,
+	# hit again in a new place. The rule: a function that can legitimately fail
+	# must never be the right-hand side of a bare assignment under set -e.
+	_bg_managed=$(browser_find_managed) || _bg_managed=""
+	if [ -n "$_bg_managed" ]; then
 		printf '%s\tinstalled by pdfulator\n' "$_bg_managed"
+	fi
 
+	# `if`, not `[ ... ] && printf`, as the loop body's last command. A loop
+	# takes the status of its final iteration, so a last candidate that happens
+	# not to exist -- the common case, the table being mostly absent paths --
+	# made the whole loop "fail" and aborted the caller under set -e.
 	browser_candidate_paths | while IFS= read -r _bg_p; do
-		[ -n "$_bg_p" ] || continue
-		[ -e "$_bg_p" ] && printf '%s\tsystem\n' "$_bg_p"
+		if [ -n "$_bg_p" ] && [ -e "$_bg_p" ]; then
+			printf '%s\tsystem\n' "$_bg_p"
+		fi
 	done
 
 	browser_path_names | while IFS= read -r _bg_n; do
-		_bg_p=$(command -v "$_bg_n" 2>/dev/null) || continue
-		[ -n "$_bg_p" ] && [ -x "$_bg_p" ] || continue
-		printf '%s\ton PATH\n' "$_bg_p"
+		_bg_p=$(command -v "$_bg_n" 2>/dev/null) || _bg_p=""
+		if [ -n "$_bg_p" ] && [ -f "$_bg_p" ] && [ -x "$_bg_p" ]; then
+			printf '%s\ton PATH\n' "$_bg_p"
+		fi
 	done
 
 	return 0

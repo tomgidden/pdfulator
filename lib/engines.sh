@@ -67,7 +67,10 @@ engine_get() {  # engine_get <id> <key>
 		# is compared with its own trailing blanks removed, and the value with
 		# blanks stripped from both ends.
 		_eg_key=${_eg_line%%=*}
-		[ "$_eg_key" = "$_eg_line" ] && continue   # no '=': not a setting
+		# No '=' at all: not a setting. `if`, not `&&`, throughout this file --
+		# a bare `[ ... ] && ...` whose test is false is a failing command, and
+		# under set -e that aborts the caller. See browser_gather.
+		if [ "$_eg_key" = "$_eg_line" ]; then continue; fi
 		_eg_key=${_eg_key%"${_eg_key##*[! 	]}"}
 		[ "$_eg_key" = "$2" ] || continue
 
@@ -171,7 +174,7 @@ engine_warn_deprecated() {  # engine_warn_deprecated <id>
 # all a test engine is ever wanted for.
 engine_pin() {  # engine_pin <id>
 	engine_exists "$1" || { engines_error "no engine named \"$1\"."; return 1; }
-	engine_is_internal "$1" && return 0
+	if engine_is_internal "$1"; then return 0; fi
 	mkdir -p -- "$(dirname -- "$ENGINE_CONF")"
 	printf '%s\n' "$1" > "$ENGINE_CONF"
 	return 0
@@ -189,14 +192,14 @@ engines_describe() {
 
 	_ed_any=0
 	for _ed_id in $(engines_list); do
-		engine_is_internal "$_ed_id" && continue
+		if engine_is_internal "$_ed_id"; then continue; fi
 		_ed_any=1
 
 		_ed_mark="  "
-		[ "$_ed_id" = "$_ed_current" ] && _ed_mark="* "
+		if [ "$_ed_id" = "$_ed_current" ]; then _ed_mark="* "; fi
 
 		_ed_note=""
-		engine_is_deprecated "$_ed_id" && _ed_note="  (deprecated)"
+		if engine_is_deprecated "$_ed_id"; then _ed_note="  (deprecated)"; fi
 
 		printf '%s%-16s %s%s\n' "$_ed_mark" "$_ed_id" \
 		       "$(engine_get "$_ed_id" description)" "$_ed_note"
@@ -211,7 +214,7 @@ engines_describe() {
 	done
 
 	[ "$_ed_any" = 1 ] || printf 'No engines are installed.\n'
-	[ -n "$_ed_current" ] && printf '\n* = in use\n'
+	if [ -n "$_ed_current" ]; then printf '\n* = in use\n'; fi
 	return 0
 }
 

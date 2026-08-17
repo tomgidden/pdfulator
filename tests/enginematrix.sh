@@ -76,6 +76,38 @@ setup() {  # setup — a standard cast of engines
 }
 
 
+echo "============ SET -E ============"
+# The wrapper runs with `set -e`. A `[ ... ] && ...` whose test is false is a
+# failing command, and as a non-final statement that aborts the caller with no
+# message -- which is how browser_gather came to report no browsers on a
+# machine with two. Same shapes exist here, so they get the same guard.
+sete() {  # sete <description> <shell-snippet>
+	if out=$(sh -c "set -e
+		PDFULATOR_DIR='$BASE/dist'; PDFULATOR_HOME='$BASE/home'
+		. '$LIB/paths.sh'; . '$LIB/engines.sh'
+		ENGINES_DIR='$BASE/dist/engines'; ENGINE_CONF='$BASE/home/.engine'
+		$2" 2>&1); then
+		printf 'ok    %s\n' "$1"
+	else
+		printf 'FAIL  %s (aborted under set -e)\n        %s\n' "$1" "$out"
+		FAIL=1
+	fi
+}
+
+setup
+sete "engines_list survives set -e"      'x=$(engines_list)'
+sete "engine_get survives set -e"        'x=$(engine_get vivlio parser)'
+sete "engine_get on a missing key"       'x=$(engine_get vivlio nosuchkey) || true'
+sete "engine_resolve survives set -e"    'x=$(engine_resolve)'
+sete "engines_describe survives set -e"  'x=$(engines_describe)'
+sete "engine_pin of an internal engine"  'engine_pin null'
+# The predicates are *meant* to return non-zero; a caller must use them in a
+# conditional, and they must not abort before it can.
+sete "needs_* predicates, in a test"     'if engine_needs_docker vivlio; then :; fi'
+sete "engine_is_internal, in a test"     'if engine_is_internal vivlio; then :; fi'
+sete "engine_warn_deprecated is safe"    'engine_warn_deprecated vivlio 2>/dev/null'
+
+
 echo "============ DISCOVERY ============"
 setup
 check "lists installed engines" "null pandoc-xslt vivlio" \

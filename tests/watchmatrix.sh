@@ -41,10 +41,20 @@ fixture() {
 # <action> shortly after it starts. Every conversion appends to $BASE/log, so
 # the log is the record of what the watcher reacted to.
 #
-# The sleep before the action is what makes this deterministic: a change made
-# before the watcher has taken its first fingerprint is not a change it can
-# see, and the test would fail for a reason that has nothing to do with the
-# code under test.
+# Waiting for the watcher to be *ready* rather than sleeping a guessed
+# interval. A change made before the first fingerprint is taken is not a change
+# the watcher can see, so the action must not happen until it is watching.
+#
+# A fixed `sleep 0.5` was not enough: on a slower host (Docker on a NAS) the
+# baseline was sometimes still being taken, the action landed inside it, and
+# the case failed about 60% of the time -- as a *spurious change detected*,
+# which looks exactly like a real bug in the fallback. A test that cries wolf
+# on slow hardware is worse than no test, since the response is to stop reading
+# it.
+#
+# Readiness is observed rather than assumed: touch a file the watcher must
+# react to, and wait for the reaction. Once it has fired once, the baseline
+# demonstrably exists.
 watch_run() {  # watch_run <timeout> <action>
 	: > "$BASE/log"
 	watch_on_change() { printf 'convert %s\n' "$1" >> "$BASE/log"; }
@@ -52,7 +62,18 @@ watch_run() {  # watch_run <timeout> <action>
 	watch_dir "$BASE/src" >/dev/null 2>&1 &
 	_wr_pid=$!
 
-	sleep 0.5
+	# Provoke one reaction, and wait up to ~10s for it. The file is removed
+	# afterwards so it cannot affect what the case under test then observes.
+	printf '# warmup\n' > "$BASE/src/zz-warmup.md"
+	_wr_n=0
+	while [ "$(hits)" -eq 0 ] && [ "$_wr_n" -lt 100 ]; do
+		sleep 0.1
+		_wr_n=$((_wr_n + 1))
+	done
+	rm -f "$BASE/src/zz-warmup.md"
+	sleep 0.3            # let the removal settle into a new baseline
+	: > "$BASE/log"      # ...and forget the warmup, so hits() counts this case
+
 	eval "$2"
 	sleep "$1"
 
