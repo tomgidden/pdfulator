@@ -134,6 +134,7 @@ test-lib:
 	sh tests/planmatrix.sh
 	sh tests/themematrix.sh
 	sh tests/browsermatrix.sh
+	sh tests/watchmatrix.sh
 
 # Argument-handling matrices. These need a CHROME_PATH (or a pinned browser);
 # wrapmatrix additionally needs the tarball, since it installs what it tests.
