@@ -56,7 +56,7 @@ jobs_list_markdown() {  # jobs_list_markdown <dir>
 jobs_plan_dir() {  # jobs_plan_dir <srcdir> [outdir]
 	_jd_src=$(abspath "$1")
 	_jd_out=""
-	[ -n "${2:-}" ] && _jd_out=$(abspath "$2")
+	if [ -n "${2:-}" ]; then _jd_out=$(abspath "$2"); fi
 
 	_jd_any=0
 	for _jd_f in $(jobs_list_markdown "$_jd_src"); do

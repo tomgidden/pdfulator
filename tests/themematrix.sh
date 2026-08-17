@@ -68,6 +68,30 @@ run() {  # run <expect: ok|fail> <expected-result-or-blank> [arg]
 	esac
 }
 
+echo "============ SET -E ============"
+# The wrapper runs with `set -e`; theme resolution must survive it, including
+# the failure path, whose "Looked in:" loop ends in a test. See browsermatrix.
+sete() {  # sete <description> <shell-snippet>
+	if out=$(sh -c "set -e
+		PDFULATOR_DIR='$BASE/dist'; PDFULATOR_HOME='$BASE/home'
+		. '$LIB/paths.sh'; . '$LIB/theme.sh'
+		cd '$BASE/cwd'
+		$2" 2>&1); then
+		printf 'ok    %s\n' "$1"
+	else
+		printf 'FAIL  %s (aborted under set -e)\n        %s\n' "$1" "$out"
+		FAIL=1
+	fi
+}
+
+fixture
+sete "theme_resolve default survives"  'x=$(theme_resolve)'
+sete "theme_resolve by name survives"  'x=$(theme_resolve local)'
+# A theme that isn't found must fail *as a return value* the caller can act on,
+# not by aborting the shell before the caller sees it.
+sete "a missing theme fails, guarded"  'x=$(theme_resolve nosuch 2>/dev/null) || x=""'
+
+
 echo "============ DEFAULT ============"
 run ok "$BASE/dist/theme"
 

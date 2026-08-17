@@ -99,7 +99,7 @@ theme_resolve() {  # theme_resolve [name-or-path]
 	theme_error "no theme named \"$1\"."
 	printf 'Looked in:\n' >&2
 	printf '%s' "$_th_seen" | tr '	' '\n' | while read -r _th_line; do
-		[ -n "$_th_line" ] && printf '  %s\n' "$_th_line" >&2
+		if [ -n "$_th_line" ]; then printf '  %s\n' "$_th_line" >&2; fi
 	done
 	return 1
 }
