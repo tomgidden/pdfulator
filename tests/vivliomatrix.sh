@@ -152,6 +152,38 @@ fixture
 check "wrong arity exits 2" "2" \
       "$("$ENGINE" in.md out.pdf >/dev/null 2>&1; echo $?)"
 
+
+echo "============ CROSS-DEVICE OUTPUT ============"
+# The engine renders into $TMPDIR and moves the result into place, and
+# rename(2) cannot cross filesystems. When $TMPDIR and the output are on
+# different devices the move fails with EXDEV *after* a perfect render, which
+# reads as "conversion failed" for a conversion that succeeded.
+#
+# In a container this is the normal case rather than bad luck: the output
+# directory is a bind mount, so every write to it crosses a device boundary.
+# It was found by running the image (see tests/dockermatrix.sh for that side)
+# and is fixed by falling back to copy-then-unlink.
+#
+# Testing it needs two real filesystems, which not every machine has to hand.
+# Where one can be had cheaply -- Linux's /dev/shm is a tmpfs and separate
+# from anything on disk -- use it; otherwise say so rather than passing
+# silently, since a skipped case that looks like a pass is worse than no case.
+fixture
+OTHER_FS=""
+for _d in /dev/shm /run/shm; do
+	if [ -d "$_d" ] && [ -w "$_d" ]; then OTHER_FS=$_d; break; fi
+done
+
+if [ -n "$OTHER_FS" ]; then
+	XDEV=$(mktemp -d "$OTHER_FS/pdfulator-xdev.XXXXXX")
+	TMPDIR="$XDEV" "$ENGINE" in.md xdev.pdf "$THEME" >/dev/null 2>&1
+	check "output survives a cross-device move" "yes" \
+	      "$(is_pdf xdev.pdf && echo yes || echo no)"
+	rm -rf "$XDEV"
+else
+	printf 'skip  cross-device move (no second filesystem here)\n'
+fi
+
 echo
 [ "$FAIL" -eq 0 ] && echo "ALL EXPECTATIONS MET" || echo "SOME EXPECTATIONS MISSED"
 exit $FAIL
