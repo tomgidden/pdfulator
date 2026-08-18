@@ -10,8 +10,11 @@
 # framework's, never Vivliostyle's or Chromium's. It also lets the matrix check
 # things a planner-only test cannot: that the PDFs were really written, where
 # they were meant to go, from the source they were meant to come from.
-LIB=$(cd "$(dirname "$0")/../lib" && pwd)
-ENGINE=$(cd "$(dirname "$0")/../engines/null" && pwd)/convert
+# Resolved before anything else: fixture() cd's into the fixture directory, so
+# a path relative to $0 stops working the moment the first case runs.
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+LIB=$REPO/lib
+ENGINE=$REPO/engines/null/convert
 . "$LIB/paths.sh"
 . "$LIB/jobs.sh"
 
@@ -35,6 +38,19 @@ fixture() {
 
 ERRMSG=""
 jobs_error() { ERRMSG=$(printf '%s' "$1" | head -1); }
+
+# Defined here rather than beside the CONTRACT section that first used it: sh
+# resolves a function only once it has been read, and the STREAMS cases below
+# call this earlier in the file.
+check() {  # check <description> <expected> <actual>
+	if [ "$2" = "$3" ]; then
+		printf 'ok    %s\n' "$1"
+	else
+		printf 'FAIL  %s\n        expected: %s\n        actual:   %s\n' "$1" "$2" "$3"
+		FAIL=1
+	fi
+}
+
 
 # Plan, then run every planned job through the engine -- which is what the
 # wrapper will do once lib/engines.sh exists.
@@ -96,6 +112,71 @@ run ok   src brand-new-dir
 run fail src real.pdf
 run fail src a.md
 
+echo "============ STREAMS ============"
+# "-" means a stream, and *which* stream depends on where it appears: as the
+# input it is stdin, as the output it is stdout. These go through the wrapper
+# rather than jobs_plan, because the routing is the wrapper's -- planning has
+# nothing to say about a stream, which is the point.
+#
+# The case that matters is `doc.md -`, a file to stdout. An earlier wrapper
+# searched the whole argument list for a bare "-" and treated any hit as
+# stdin-to-stdout, so this read stdin and ignored doc.md: it hung on a terminal
+# and reported "empty input on stdin" in a pipeline, for the documented way to
+# pipe one document. Found by running the container engine, which is why the
+# fix is pinned here rather than only there.
+W=$REPO/pdfulator.sh
+W_DIR=$REPO
+SBASE=$BASE/streams
+
+stream_run() {  # stream_run <description> <expected-input-stamp> <args...>
+	_sr_desc=$1; _sr_want=$2; shift 2
+	rm -rf "$SBASE"; mkdir -p "$SBASE/home"
+	printf '# Streamed\n\nBody.\n' > "$SBASE/doc.md"
+	mkdir -p "$SBASE/adir"; printf '# In dir\n' > "$SBASE/adir/x.md"
+
+	# The null engine stamps what it was given into the PDF, so the assertion
+	# is on what the engine actually received rather than on exit status --
+	# which was 0 throughout the bug.
+	_sr_got=$( cd "$SBASE" && \
+		PDFULATOR_DIR="$W_DIR" PDFULATOR_HOME="$SBASE/home" \
+		sh "$W" --engine null "$@" 2>/dev/null </dev/null |
+		sed -n 's/^%%pdfulator-input: //p' | head -1 )
+	check "$_sr_desc" "$_sr_want" "$_sr_got"
+}
+
+# A file to stdout reads the file, not stdin.
+stream_run "file to stdout reads the file" "doc.md" doc.md -
+
+# stdin to stdout, the bare-pipe case.
+rm -rf "$SBASE"; mkdir -p "$SBASE/home"
+printf '# Piped\n' > "$SBASE/doc.md"
+STDIN_GOT=$( cd "$SBASE" && printf '# Piped in\n' |
+	PDFULATOR_DIR="$W_DIR" PDFULATOR_HOME="$SBASE/home" \
+	sh "$W" --engine null - 2>/dev/null |
+	sed -n 's/^%%pdfulator-input: //p' | head -1 )
+check "stdin to stdout reads stdin" "<stdin>" "$STDIN_GOT"
+
+# stdin to a named file: the output must be that file, not stdout. The old
+# code forced both ends to "-" as soon as it saw a dash anywhere, so the PDF
+# went to the terminal and the named file was never written.
+rm -rf "$SBASE"; mkdir -p "$SBASE/home"
+( cd "$SBASE" && printf '# To a file\n' |
+	PDFULATOR_DIR="$W_DIR" PDFULATOR_HOME="$SBASE/home" \
+	sh "$W" --engine null - out.pdf >/dev/null 2>&1 )
+check "stdin to a file writes that file" "yes" \
+      "$([ -f "$SBASE/out.pdf" ] && echo yes || echo no)"
+check "and the engine was told so" "out.pdf" \
+      "$(sed -n 's/^%%pdfulator-output: //p' "$SBASE/out.pdf" 2>/dev/null | head -1)"
+
+# A directory cannot go to one stream. Refused rather than silently converting
+# only the first document.
+rm -rf "$SBASE"; mkdir -p "$SBASE/home/x"
+mkdir -p "$SBASE/adir"; printf '# d\n' > "$SBASE/adir/x.md"
+( cd "$SBASE" && PDFULATOR_DIR="$W_DIR" PDFULATOR_HOME="$SBASE/home" \
+	sh "$W" --engine null adir - >/dev/null 2>&1 </dev/null )
+check "a directory to stdout is refused" "1" "$?"
+
+
 echo "============ ARITY ============"
 run ok
 run fail a.md b.md c.md
@@ -107,15 +188,6 @@ run fail a.md b.md c.md d.md
 # drops the theme. These check the engine received what the wrapper resolved.
 
 echo "============ CONTRACT ============"
-
-check() {  # check <description> <expected> <actual>
-	if [ "$2" = "$3" ]; then
-		printf 'ok    %s\n' "$1"
-	else
-		printf 'FAIL  %s\n        expected: %s\n        actual:   %s\n' "$1" "$2" "$3"
-		FAIL=1
-	fi
-}
 
 field() { sed -n "s/^%%pdfulator-$2: //p" "$1" | head -1; }
 
