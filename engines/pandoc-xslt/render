@@ -1,0 +1,164 @@
+#!/bin/sh
+# The conversion, as it runs *inside* the image.
+#
+#   render <input|-> <output|-> <theme-dir>
+#
+# Four formats, three tools:
+#
+#   markdown --pandoc--> DocBook 5 --xsltproc--> XSL-FO --fop--> PDF
+#
+# Distilled from v0's md2pdf.sh, which is all that survives of that entrypoint:
+# the argument scanning, the directory walking and the make rules are the
+# wrapper's job now.
+set -eu
+
+ENGINE=/engine
+
+in=${1:--}
+out=${2:--}
+theme=${3:-/theme}
+
+# The DocBook XSL stylesheets resolve their imports through the XML catalog
+# rather than over the network -- fo.xsl imports
+# http://docbook.sourceforge.net/release/xsl/current/fo/docbook.xsl, which is a
+# *identifier*, not a fetch. Without the catalog, xsltproc tries the URL and a
+# container with no network hangs until it times out.
+export XML_CATALOG_FILES="/etc/xml/catalog /usr/local/etc/xml/catalog"
+
+# A theme may override any of the three stages. Checked per run, since the
+# theme is mounted at run time and the image cannot know what is in it.
+#
+# `if`, not `[ ... ] && ...`: under set -e a bare test that fails is a failing
+# command, and a theme supplying none of these is the common case.
+TEMPLATE=$ENGINE/xsl/global.tmpl
+if [ -f "$theme/global.tmpl" ]; then TEMPLATE=$theme/global.tmpl; fi
+
+STYLESHEET=$ENGINE/xsl/fo.xsl
+if [ -f "$theme/fo.xsl" ]; then STYLESHEET=$theme/fo.xsl; fi
+
+FOPCONF=$ENGINE/xsl/fop.xconf
+if [ -f "$theme/fop.xconf" ]; then FOPCONF=$theme/fop.xconf; fi
+# Absolute, because FOP is run from the scratch directory (see stage 3) and a
+# relative config path would then resolve against the wrong place. A mounted
+# theme arrives as an absolute path already; this covers the case where one
+# does not.
+case $FOPCONF in
+	/*) ;;
+	*)  FOPCONF=$(cd -- "$(dirname -- "$FOPCONF")" && pwd)/$(basename -- "$FOPCONF") ;;
+esac
+
+FILTERS=""
+if [ -f "$ENGINE/metadata.lua" ]; then
+	FILTERS="$FILTERS --lua-filter=$ENGINE/metadata.lua"
+fi
+if [ -f "$theme/metadata.lua" ]; then
+	FILTERS="$FILTERS --lua-filter=$theme/metadata.lua"
+fi
+
+WORK=$(mktemp -d /work/pdfulator.XXXXXX)
+cleanup() { [ -n "${PDFULATOR_DEBUG:-}" ] || rm -rf "$WORK"; }
+trap cleanup EXIT INT TERM
+
+if [ "$in" = "-" ]; then
+	cat > "$WORK/doc.md"
+	leaf=doc
+	# Empty stdin is an error; an empty file is not. Shared with every other
+	# engine -- a pipe that produced nothing is a broken command line, while an
+	# empty document is one someone has started and not yet written.
+	[ -s "$WORK/doc.md" ] || {
+		echo "pandoc-xslt: empty input on stdin" >&2
+		exit 1
+	}
+	METADATA=""
+else
+	[ -f "$in" ] || { echo "pandoc-xslt: no such input: $in" >&2; exit 1; }
+	leaf=$(basename -- "$in"); leaf=${leaf%.*}
+	cp -- "$in" "$WORK/$leaf.md"
+
+	# The sidecar as --metadata-file, for the reason pandoc-pagedjs gives:
+	# pandoc reads YAML from an input file only when it is fenced, so an
+	# unfenced sidecar passed as an input is parsed as markdown and rendered
+	# into the body.
+	METADATA=""
+	base=${in%.*}
+	for ext in yaml yml; do
+		if [ -f "$base.$ext" ]; then
+			cp -- "$base.$ext" "$WORK/$leaf.$ext"
+			METADATA="--metadata-file=$WORK/$leaf.$ext"
+			break
+		fi
+	done
+fi
+
+# --- 1. Markdown to DocBook 5 -------------------------------------------------
+#
+# The template is what makes this DocBook rather than a bare article: it wraps
+# the body in <article> with the <info> block carrying title, authors,
+# copyright and the rest, which is what the XSLT below styles.
+# shellcheck disable=SC2086
+pandoc "$WORK/$leaf.md" \
+	-f commonmark_x-raw_html+task_lists+definition_lists \
+	$METADATA \
+	$FILTERS \
+	-s --template "$TEMPLATE" \
+	-t docbook5 \
+	-o "$WORK/$leaf.xml"
+
+# Pandoc emits a newline immediately after the <programlisting> open tag, and
+# XSL-FO preserves it -- so every code block gained a blank first line. v0
+# stripped it with this perl one-liner and so does this; the alternative is a
+# template change that the DocBook stylesheets would undo.
+perl -pi -e 's/(<programlisting[^\n]+)\n/$1/g;' "$WORK/$leaf.xml"
+
+# --- 2. DocBook to XSL-FO -----------------------------------------------------
+#
+# --nonet is not belt-and-braces: fo.xsl imports the DocBook stylesheets by
+# URL, and without it a missing catalog entry becomes a silent network fetch
+# (or a long hang with no network). Failing loudly is better.
+#
+# --path is how the stylesheet finds titlepages.xsl and the rest beside it.
+xsltproc --xinclude --nonet \
+	--path "$(dirname -- "$STYLESHEET")" \
+	-o "$WORK/$leaf.fo" \
+	"$STYLESHEET" \
+	"$WORK/$leaf.xml"
+
+# --- 3. XSL-FO to PDF ---------------------------------------------------------
+#
+# Two path facts, and they pull in opposite directions.
+#
+# FOP resolves the relative paths in its config -- the font directory, the
+# header logo -- against <base>, and <base> itself is taken relative to the
+# *working directory*, not to the config file's own location. So the shipped
+# fop.xconf uses absolute paths (/engine/xsl, /engine/xsl/fonts): with a
+# relative base, running FOP from anywhere but /engine/xsl silently found no
+# fonts and fell back to Times, producing a perfectly valid PDF in the wrong
+# typeface. A theme shipping its own fop.xconf must likewise use absolute
+# paths, or paths relative to wherever it expects to be run.
+#
+# And it must NOT be run from /engine/xsl. FOP writes a `.fop`
+# preferences file into the *current* directory on startup, and /engine is
+# read-only to the caller's uid:
+#
+#   SEVERE: Exception
+#   org.apache.fop.apps.FOPException: java.io.FileNotFoundException: .fop
+#   (Permission denied)
+#
+# after the whole pipeline has otherwise succeeded. $HOME being writable is
+# not enough -- this one follows the cwd. So it runs in the scratch directory,
+# which is per-conversion and disposable.
+#
+# Logging goes to stderr and is chatty at INFO ("Rendered page #1"), which is
+# correct: stdout may be the PDF, and a caller wanting quiet redirects it.
+cd "$WORK"
+fop -c "$FOPCONF" -fo "$WORK/$leaf.fo" -pdf "$WORK/$leaf.pdf" >&2
+
+if [ "$out" = "-" ]; then
+	cat "$WORK/$leaf.pdf"
+else
+	outdir=$(dirname -- "$out")
+	[ -d "$outdir" ] || mkdir -p -- "$outdir"
+	# mv, not rename: the output is a bind mount, so the move crosses a
+	# filesystem and rename(2) would fail with EXDEV (see 7ef0319).
+	mv -- "$WORK/$leaf.pdf" "$out"
+fi

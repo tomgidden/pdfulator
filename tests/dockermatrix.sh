@@ -21,7 +21,19 @@
 # tested. Each engine supplies only its name and its built-in theme path, so
 # those are what the cases parameterise over.
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-ENGINES="vivlio-docker:/app/theme pandoc-pagedjs:/theme"
+# Discovered, not listed: every engine declaring needs_docker=yes is tested,
+# so adding one cannot quietly skip these cases. The built-in theme path is
+# read from the engine's own convert, which is where it is declared -- it is
+# not in engine.conf, being an implementation detail of the image rather than
+# something a user configures.
+ENGINES=$(for _c in "$REPO"/engines/*/engine.conf; do
+	[ -f "$_c" ] || continue
+	grep -q '^needs_docker=yes' "$_c" || continue
+	_id=$(basename -- "$(dirname -- "$_c")")
+	_th=$(sed -n 's/^CONTAINER_THEME=//p' "$(dirname -- "$_c")/convert" | head -1)
+	[ -n "$_th" ] || _th=/theme
+	printf '%s:%s ' "$_id" "$_th"
+done)
 
 BASE=$(printf '%s' "${TMPDIR:-/tmp}" | sed 's|/*$||')/pdfulator-dockermatrix.$$
 FAIL=0
