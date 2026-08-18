@@ -1,0 +1,144 @@
+#!/bin/sh
+# The conversion, as it runs *inside* the image.
+#
+#   render <input|-> <output|-> <theme-dir>
+#
+# The engine contract, honoured in the container. This is what v1's
+# convert_to_pdf did, and nothing else that entrypoint.sh did: no argument
+# scanning, no directory walking, no up-to-date checking, no watching. Those
+# are the wrapper's, and having them here as well is what let v1's CLI drift
+# away from the rest of the tool.
+#
+# Named `render` rather than `convert` to keep the two straight: `convert` is
+# the host-side script that starts a container, and this is what that container
+# runs. A reader looking at a stack trace should be able to tell which side of
+# the boundary they are on.
+set -eu
+
+DEFAULTS=/defaults
+ENGINE=/engine
+
+in=${1:--}
+out=${2:--}
+theme=${3:-/theme}
+
+# Pandoc's markdown, with the extensions v1 settled on.
+#
+# commonmark_x rather than pandoc's own markdown: it is CommonMark plus a
+# curated extension set, so a document that renders elsewhere renders here.
+# -raw_html because this pipeline prints to paper -- embedded HTML is a way to
+# smuggle in layout that the stylesheet then cannot control.
+FORMAT=commonmark_x-raw_html+task_lists+definition_lists
+
+# A theme may override the template and the filter as well as the CSS. Checked
+# per run rather than baked in, since the theme directory is mounted at run
+# time and the image cannot know what is in it.
+# `if`, not `[ ... ] && ...`, throughout. Under `set -e` a bare test that
+# fails is a failing command, and if it is the last one in the script -- or
+# anywhere the shell is not already ignoring the status -- it exits. Silently:
+# no message, no non-zero status the caller can see a reason for. Three bugs
+# in lib/browser.sh were exactly this shape (daf9507), and a theme without an
+# article.tmpl is the common case here, so the false branch is the normal one.
+TEMPLATE=$ENGINE/article.tmpl
+if [ -f "$theme/article.tmpl" ]; then TEMPLATE=$theme/article.tmpl; fi
+
+# Both filters run when both exist: the engine's hoists the title and fills in
+# the year, and a theme's can add to that rather than having to reimplement it.
+FILTERS=""
+if [ -f "$ENGINE/metadata.lua" ]; then
+	FILTERS="$FILTERS --lua-filter=$ENGINE/metadata.lua"
+fi
+if [ -f "$theme/metadata.lua" ]; then
+	FILTERS="$FILTERS --lua-filter=$theme/metadata.lua"
+fi
+
+# Everything happens in a scratch directory, including for a file input.
+# Copying the document somewhere private is what makes the read-only input
+# mount viable: nothing is written next to the user's document.
+WORK=$(mktemp -d /work/pdfulator.XXXXXX)
+cleanup() { [ -n "${PDFULATOR_DEBUG:-}" ] || rm -rf "$WORK"; }
+trap cleanup EXIT INT TERM
+
+if [ "$in" = "-" ]; then
+	cat > "$WORK/doc.md"
+	leaf=doc
+	# Empty *stdin* is an error; an empty file is not. The asymmetry is
+	# deliberate and shared with the vivlio engine: a pipe that produced
+	# nothing is a broken command line, while an empty document is a document
+	# someone has started and not yet written.
+	[ -s "$WORK/doc.md" ] || {
+		echo "pandoc-pagedjs: empty input on stdin" >&2
+		exit 1
+	}
+	SOURCE="$WORK/doc.md"
+	METADATA=""
+else
+	[ -f "$in" ] || { echo "pandoc-pagedjs: no such input: $in" >&2; exit 1; }
+	leaf=$(basename -- "$in"); leaf=${leaf%.*}
+	cp -- "$in" "$WORK/$leaf.md"
+	SOURCE="$WORK/$leaf.md"
+
+	# The sidecar, if there is one, as --metadata-file.
+	#
+	# NOT as a second input file, which is what v1 did and what this first
+	# reproduced. Pandoc only reads YAML from an input file when it is fenced
+	# with --- and ..., and a sidecar is not: so an unfenced one is parsed as
+	# *markdown* and its text lands in the body of the document --
+	# "title: My Report authors: name: Tom" printed as a paragraph, with the
+	# title unchanged. Fencing it does not help either, because commonmark_x
+	# has no YAML metadata block extension; the values are simply dropped.
+	#
+	# --metadata-file reads it as what it is, and matches how the vivlio
+	# engine treats a sidecar, so the same document gets the same title from
+	# either engine.
+	METADATA=""
+	base=${in%.*}
+	for ext in yaml yml; do
+		if [ -f "$base.$ext" ]; then
+			cp -- "$base.$ext" "$WORK/$leaf.$ext"
+			METADATA="--metadata-file=$WORK/$leaf.$ext"
+			break
+		fi
+	done
+fi
+
+# Markdown -> HTML.
+#
+# --no-highlight because the stylesheet does its own code styling; pandoc's
+# inline highlighting would fight it with hardcoded colours.
+# shellcheck disable=SC2086
+pandoc "$SOURCE" \
+	-f "$FORMAT" \
+	$METADATA \
+	$FILTERS \
+	--template="$TEMPLATE" \
+	--no-highlight \
+	-t html5 \
+	-o "$WORK/$leaf.html"
+
+# HTML -> PDF.
+#
+# The browser flags are not optional in a container: --no-sandbox because
+# Chromium's sandbox needs privileges a default `docker run` does not grant,
+# and --disable-dev-shm-usage because /dev/shm defaults to 64MB, which a
+# paginating renderer exhausts on a document of any size -- producing a crash
+# that reads as a Paged.js failure rather than as a full filesystem.
+#
+# Written to the scratch directory and moved, so an interrupted run cannot
+# leave a half-written PDF that still looks like one.
+pagedjs-cli \
+	-i "$WORK/$leaf.html" \
+	-o "$WORK/$leaf.pdf" \
+	--browserArgs "--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage" \
+	>&2
+
+if [ "$out" = "-" ]; then
+	cat "$WORK/$leaf.pdf"
+else
+	outdir=$(dirname -- "$out")
+	[ -d "$outdir" ] || mkdir -p -- "$outdir"
+	# mv across a bind mount is a copy, and rename(2) cannot cross
+	# filesystems -- the same EXDEV that bit the vivlio engine (7ef0319).
+	# `mv` handles the fallback itself, which is why this is not a rename.
+	mv -- "$WORK/$leaf.pdf" "$out"
+fi

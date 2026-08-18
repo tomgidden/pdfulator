@@ -1,0 +1,29 @@
+#!/bin/sh
+# The pandoc-pagedjs engine's convert step.
+#
+#   convert <input|-> <output|-> <theme-dir>
+#
+# Host side: build the mounts and start the container. The conversion itself
+# is `render`, which runs inside the image -- see that file for the pandoc and
+# Paged.js invocations.
+#
+# The translation from contract to `docker run` is shared with every other
+# container engine (lib/container.sh); this file supplies only what differs.
+set -eu
+
+ENGINE_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+
+LIB=${PDFULATOR_LIB:-$ENGINE_DIR/../../lib}
+[ -f "$LIB/container.sh" ] || {
+	echo "pandoc-pagedjs: cannot find lib/container.sh (looked in $LIB)" >&2
+	exit 1
+}
+. "$LIB/container.sh"
+
+CONTAINER_ENGINE=pandoc-pagedjs
+
+# This image keeps its assets at the root (/defaults, /engine, /theme) rather
+# than under /app, following v1's layout -- so its built-in theme is /theme.
+CONTAINER_THEME=/theme
+
+container_run "$ENGINE_DIR" "${1:-}" "${2:-}" "${3:-}"

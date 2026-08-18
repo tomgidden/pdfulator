@@ -1,11 +1,18 @@
 PREFIX = $(HOME)/.local
 SHARE  = $(PREFIX)/share/pdfulator
 
-# The image is the vivlio-docker engine's, and the engine is where its name is
-# recorded -- so the tag comes out of engine.conf rather than being repeated
-# here. Two places to change a tag is one place to forget.
+# Which container engine the docker- targets use, and which image `make build`
+# builds. Override on the command line: `make build DOCKER_ENGINE=pandoc-pagedjs`.
+#
+# The tag comes out of the engine's own engine.conf rather than being repeated
+# here -- two places to change a tag is one place to forget.
 DOCKER_ENGINE = vivlio-docker
 TAG = $(shell sed -n 's/^image=//p' engines/$(DOCKER_ENGINE)/engine.conf | head -1)
+
+# Every container engine, for `make build-all`. Discovered rather than listed,
+# so a new engine directory is picked up by existing it.
+DOCKER_ENGINES = $(shell grep -l '^needs_docker=yes' engines/*/engine.conf | \
+                   sed 's|engines/||; s|/engine.conf||')
 
 # THEME= and DEBUG= become wrapper switches rather than docker options. The old
 # rules bolted `-v $(THEME):/app/theme` onto the container directly, which the
@@ -58,6 +65,15 @@ docker-watch:
 
 build:
 	docker build -f engines/$(DOCKER_ENGINE)/Dockerfile -t $(TAG) .
+
+# Each container engine's image, one after another. Step 9 turns this into a
+# CI matrix; this is the local equivalent.
+build-all:
+	@for e in $(DOCKER_ENGINES); do \
+		tag=$$(sed -n 's/^image=//p' engines/$$e/engine.conf | head -1); \
+		echo "==> $$e ($$tag)"; \
+		docker build -f engines/$$e/Dockerfile -t "$$tag" . || exit 1; \
+	done
 
 release:
 	docker buildx build --push \
@@ -143,6 +159,7 @@ test-lib:
 	sh tests/watchmatrix.sh
 	sh tests/enginematrix.sh
 	sh tests/dockermatrix.sh
+	sh tests/pandocmatrix.sh
 
 # Argument-handling matrices. These need a CHROME_PATH (or a pinned browser);
 # wrapmatrix additionally needs the tarball, since it installs what it tests.
@@ -157,5 +174,5 @@ test: test-lib $(DIST)
 clean:
 	rm -rf .dist .version $(DIST) $(DIST).sha256
 
-.PHONY: all watch docker-watch build release dist install-local test test-lib clean
+.PHONY: all watch docker-watch build build-all release dist install-local test test-lib clean
 
