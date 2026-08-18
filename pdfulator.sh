@@ -139,28 +139,44 @@ install_bun() {
 	fi
 
 	echo "pdfulator: bun download failed." >&2
-	[ -s "$BUN_HOME/.install.log" ] && tail -5 "$BUN_HOME/.install.log" >&2
+	# `if`, not `[ ... ] &&`: with no log to show, a bare test here is a failing
+	# command, and the `return 1` below would never be reached under set -e --
+	# the caller would abort with a different status and no diagnosis.
+	if [ -s "$BUN_HOME/.install.log" ]; then
+		tail -5 "$BUN_HOME/.install.log" >&2
+	fi
 	return 1
 }
 
 # Every usable runtime on this machine, one "path<TAB>label" per line.
 #
 # bun is the one we manage: it's what the lockfile is for, and the only one we
-# will ever download. node and deno are listed because pdfulator.js is plain
-# JavaScript and runs on them unmodified -- if the user already has one, there
-# is no reason to make them install anything.
+# will ever download. node and deno are listed because the vivlio engine's
+# main.js is plain JavaScript and runs on them unmodified -- if the user
+# already has one, there is no reason to make them install anything.
+#
+# Written with `if` throughout, and ending in an explicit `return 0`, for the
+# reason browser_gather now is: a bare `[ ... ] && ...`, or a loop whose last
+# iteration ends in a false test, is a *failing command*, and under `set -e`
+# that aborts the caller silently. Its one call site guards it with `|| true`,
+# so this is defence rather than a fix -- but the browser listing had the same
+# shape, wasn't guarded, and reported "no browsers" on a machine with two.
 list_runtimes() {
-	[ -x "$BUN_PRIVATE" ] &&
+	if [ -x "$BUN_PRIVATE" ]; then
 		printf '%s\tbun %s (installed by pdfulator)\n' \
 			"$BUN_PRIVATE" "$("$BUN_PRIVATE" --version 2>/dev/null)"
+	fi
 
 	for rt in bun node deno; do
-		p=$(command -v "$rt" 2>/dev/null) || continue
-		[ "$p" = "$BUN_PRIVATE" ] && continue
-		# deno reports "deno x.y.z ..."; bun and node report a bare version.
-		v=$("$p" --version 2>/dev/null | head -1 | sed "s/^$rt //")
-		printf '%s\t%s %s\n' "$p" "$rt" "$v"
+		p=$(command -v "$rt" 2>/dev/null) || p=""
+		if [ -n "$p" ] && [ "$p" != "$BUN_PRIVATE" ]; then
+			# deno reports "deno x.y.z ..."; bun and node report a bare version.
+			v=$("$p" --version 2>/dev/null | head -1 | sed "s/^$rt //")
+			printf '%s\t%s %s\n' "$p" "$rt" "$v"
+		fi
 	done
+
+	return 0
 }
 
 # (run_js is gone. There is no longer a single "the JS" to run: conversion goes
@@ -1128,7 +1144,7 @@ run_jobs() {
 	# failed document set the exit status without stopping the others.
 	while IFS='	' read -r _rj_in _rj_out; do
 		[ -n "$_rj_in" ] || continue
-		[ "$verbose" = 1 ] && echo "Converting $_rj_in" >&2
+		if [ "$verbose" = 1 ]; then echo "Converting $_rj_in" >&2; fi
 		engine_convert "$ENGINE" "$_rj_in" "$_rj_out" "$THEME_DIR" || _rj_status=1
 	done <<-EOF
 	$_rj_list
