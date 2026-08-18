@@ -4,180 +4,34 @@
 #   convert <input|-> <output|-> <theme-dir>
 #
 # The same contract every engine honours, satisfied by running a container
-# instead of a local process. All the work here is translation: a container
-# cannot see the host's filesystem, so each path in the contract has to become
-# a mount plus the path it has *inside* the image.
+# rather than a local process. All the work is translation -- host paths into
+# mounts -- and that translation is identical for every container engine, so it
+# lives in lib/container.sh and this file supplies only what is specific:
+# which engine this is, and where its built-in theme sits inside its own image.
 #
-# The wrapper is not involved in that and must not be. It resolved a theme to a
-# host directory because that is what it knows about; turning that into
-# `-v /Users/tom/themes/foo:/theme` is this engine's business, and an engine
-# that ran natively would ignore it. That split is why the contract passes a
-# directory rather than a name (see lib/theme.sh).
+# The wrapper is not involved in the translation and must not be. It resolved
+# the theme to a host directory because that is what it knows about; turning
+# that into `-v /Users/tom/themes/foo:/theme` is the engine's business, and an
+# engine running natively would ignore it. That split is why the contract
+# passes a directory rather than a name (see lib/theme.sh).
 set -eu
 
 ENGINE_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 
-in=${1:-}
-out=${2:-}
-theme=${3:-}
-
-[ -n "$in" ]  || { echo "vivlio-docker: no input given"  >&2; exit 2; }
-[ -n "$out" ] || { echo "vivlio-docker: no output given" >&2; exit 2; }
-
-# The image to run. Read from engine.conf rather than hardcoded, so that the
-# tag the engine declares and the tag it runs cannot disagree -- and so a user
-# can point the engine at their own build by editing one line.
-#
-# Parsed with the same care lib/engines.sh takes, and for the same reason: this
-# file must not become a thing that executes engine.conf.
-IMAGE=${PDFULATOR_IMAGE:-}
-if [ -z "$IMAGE" ] && [ -f "$ENGINE_DIR/engine.conf" ]; then
-	IMAGE=$(sed -n 's/^[[:space:]]*image[[:space:]]*=[[:space:]]*//p' \
-	        "$ENGINE_DIR/engine.conf" | head -1)
-	# Trailing blanks are invisible in an editor and would become part of the
-	# tag, producing a pull failure that names an image looking exactly right.
-	IMAGE=$(printf '%s' "$IMAGE" | sed 's/[[:space:]]*$//')
-fi
-[ -n "$IMAGE" ] || {
-	echo "vivlio-docker: no image configured (image= in engine.conf)." >&2
+# lib/ is found relative to the engine, not to the wrapper: an engine may be
+# exec'd directly, and $PDFULATOR_DIR is not guaranteed to be set when it is.
+LIB=${PDFULATOR_LIB:-$ENGINE_DIR/../../lib}
+[ -f "$LIB/container.sh" ] || {
+	echo "vivlio-docker: cannot find lib/container.sh (looked in $LIB)" >&2
 	exit 1
 }
+. "$LIB/container.sh"
 
-DOCKER=${PDFULATOR_DOCKER:-docker}
-command -v "$DOCKER" >/dev/null 2>&1 || {
-	echo "vivlio-docker: $DOCKER is not installed or not on PATH." >&2
-	echo "Install Docker, or use the bundled engine: pdfulator --engine vivlio" >&2
-	exit 1
-}
+CONTAINER_ENGINE=vivlio-docker
 
-# Absolute paths for everything mounted. `-v relative/path:/in` is not a bind
-# mount to docker -- it is a *named volume* called "relative", silently created
-# empty, so the conversion would read an empty directory and report an empty
-# document rather than failing.
-abs() {  # abs <path>
-	_a_dir=$(dirname -- "$1")
-	_a_base=$(basename -- "$1")
-	if [ -d "$_a_dir" ]; then
-		_a_dir=$(cd -- "$_a_dir" && pwd)
-	fi
-	case $_a_dir in
-		*/) printf '%s%s\n' "$_a_dir" "$_a_base" ;;
-		*)  printf '%s/%s\n' "$_a_dir" "$_a_base" ;;
-	esac
-}
+# The image builds under /app, so its own theme is /app/theme -- unlike the
+# pandoc engines, whose assets sit at the root. This is the one path that
+# genuinely differs between container engines.
+CONTAINER_THEME=/app/theme
 
-# Mounts and flags are accumulated as they are decided, then handed to docker
-# in one place at the bottom. Flags are plain words and live in $FLAGS; mounts
-# may contain spaces (a path like ~/Documents/My Notes is ordinary) so they go
-# into the positional parameters, which survive word-splitting where a string
-# would not.
-FLAGS="--rm --init"
-set --
-
-# --- Input -------------------------------------------------------------------
-#
-# The file's *directory* is mounted, not the file. Two reasons, and the second
-# is the one that bites: an image reference like `![](fig.png)` resolves
-# relative to the document, so a lone file arrives with its illustrations
-# missing; and bind-mounting a single file pins an inode, so an editor that
-# saves by write-and-rename (most of them) leaves the container looking at the
-# deleted original.
-#
-# Read-only, because an engine converting a document has no business writing
-# next to it.
-if [ "$in" = "-" ]; then
-	IN_ARG="-"
-	FLAGS="$FLAGS -i"
-else
-	[ -f "$in" ] || { echo "vivlio-docker: no such input: $in" >&2; exit 1; }
-	in_abs=$(abs "$in")
-	in_dir=$(dirname -- "$in_abs")
-	set -- "$@" -v "$in_dir:/in:ro"
-	IN_ARG="/in/$(basename -- "$in_abs")"
-fi
-
-# --- Output ------------------------------------------------------------------
-#
-# Also a directory mount, and it must be one that exists: docker creates a
-# missing mount source as a root-owned directory on the host, which is a
-# surprising thing for a PDF conversion to leave behind.
-#
-# The file itself may well not exist yet -- that is the normal case -- so it is
-# the parent that is checked and mounted.
-# `pdfulator dir/` writes each PDF beside its source, so input and output are
-# commonly the *same* host directory arriving at two container paths -- /in
-# read-only and /out writable. That is fine, and deliberately not collapsed
-# into one mount: the two are separate in the contract, and a container that
-# saw only /in would have nowhere to write. Docker binds them independently,
-# so the read-only view does not make the writable one read-only.
-if [ "$out" = "-" ]; then
-	OUT_ARG="-"
-else
-	out_abs=$(abs "$out")
-	out_dir=$(dirname -- "$out_abs")
-	[ -d "$out_dir" ] || mkdir -p -- "$out_dir"
-	set -- "$@" -v "$out_dir:/out"
-	OUT_ARG="/out/$(basename -- "$out_abs")"
-fi
-
-# --- Theme -------------------------------------------------------------------
-#
-# The built-in theme is already in the image, so mounting it would replace a
-# copy with an identical copy -- and would fail outright for a user running
-# from a tarball whose theme directory the daemon cannot reach. Only a theme
-# from outside the image is mounted.
-#
-# Compared by resolved path, since $PDFULATOR_DIR/theme and ./theme are the
-# same directory reached two ways.
-THEME_ARG=/app/theme
-if [ -n "$theme" ] && [ -d "$theme" ]; then
-	theme_abs=$(cd -- "$theme" && pwd)
-	builtin_theme=""
-	if [ -d "${PDFULATOR_DIR:-}/theme" ]; then
-		builtin_theme=$(cd -- "$PDFULATOR_DIR/theme" && pwd)
-	fi
-	if [ "$theme_abs" != "$builtin_theme" ]; then
-		set -- "$@" -v "$theme_abs:/theme:ro"
-		THEME_ARG=/theme
-	fi
-fi
-
-# --- Ownership ---------------------------------------------------------------
-#
-# The image runs as its `bun` user, whose uid is very unlikely to be the
-# caller's. On Linux that means the PDF lands owned by someone else and the
-# user cannot overwrite it next time; on macOS and Windows the file-sharing
-# layer remaps ownership and this is unnecessary but harmless.
-#
-# Only when there is a real uid to pass: `id -u` gives a number everywhere
-# POSIX, but a container told `--user 0:0` would write root-owned files, which
-# is precisely the situation being avoided, so root is left alone to mean
-# "the caller knows what they are doing".
-if [ "$(id -u)" != 0 ]; then
-	FLAGS="$FLAGS --user $(id -u):$(id -g)"
-
-	# A uid passed in this way exists in no /etc/passwd inside the image, so
-	# it has no home directory -- and Chromium insists on one. It fails in a
-	# way that names neither the cause nor Chromium:
-	#
-	#   chrome_crashpad_handler: --database is required
-	#
-	# which is the crash reporter reporting that it has nowhere to write its
-	# database. $HOME is what it consults, and an unset HOME leaves it with
-	# nothing rather than with a default.
-	#
-	# /tmp is the writable directory the image is certain to have, whatever
-	# uid arrives, and it is per-container so nothing outlives the run.
-	FLAGS="$FLAGS -e HOME=/tmp"
-fi
-
-# Verbosity travels in, so that -v on the host is -v in the container. The
-# container has no other way to know.
-if [ -n "${PDFULATOR_VERBOSE:-}" ]; then FLAGS="$FLAGS -e PDFULATOR_VERBOSE=1"; fi
-if [ -n "${PDFULATOR_DEBUG:-}" ];   then FLAGS="$FLAGS -e PDFULATOR_DEBUG=1";   fi
-
-# $FLAGS is deliberately unquoted -- it is a list of separate words, not one
-# argument -- while "$@" carries the mounts, whose values may contain spaces.
-# That is the whole reason for the two-container split above.
-# shellcheck disable=SC2086
-exec "$DOCKER" run $FLAGS "$@" "$IMAGE" "$IN_ARG" "$OUT_ARG" "$THEME_ARG"
+container_run "$ENGINE_DIR" "${1:-}" "${2:-}" "${3:-}"
