@@ -1125,6 +1125,30 @@ if engine_needs_browser "$ENGINE" && [ -z "${CHROME_PATH:-}" ]; then
 	exit 1
 fi
 
+# Docker, for the container engines. Checked here rather than left to the
+# engine so the message names the alternative: a user who picked
+# vivlio-docker on a machine without a daemon wants to be told that the
+# bundled engine is right there, not to read a docker error.
+#
+# Only that the client exists and the daemon answers -- `docker info` rather
+# than `command -v docker`, because Docker Desktop installs a client that is
+# present and useless while the VM is stopped, and "cannot connect to the
+# Docker daemon" mid-conversion is a worse place to find that out.
+if engine_needs_docker "$ENGINE"; then
+	DOCKER_CMD=${PDFULATOR_DOCKER:-docker}
+	if ! command -v "$DOCKER_CMD" >/dev/null 2>&1; then
+		echo "pdfulator: the $ENGINE engine needs Docker, which isn't installed." >&2
+		echo "Install Docker, or use the bundled engine: pdfulator --engine vivlio" >&2
+		exit 1
+	fi
+	if ! "$DOCKER_CMD" info >/dev/null 2>&1; then
+		echo "pdfulator: Docker is installed but not responding." >&2
+		echo "Start Docker and try again, or use: pdfulator --engine vivlio" >&2
+		exit 1
+	fi
+	export PDFULATOR_DOCKER="$DOCKER_CMD"
+fi
+
 PDFULATOR_VERBOSE=$([ "$verbose" = 1 ] && echo 1 || echo "")
 PDFULATOR_DEBUG=$([ "$debug" = 1 ] && echo 1 || echo "")
 export PDFULATOR_VERBOSE PDFULATOR_DEBUG PDFULATOR_DIR
@@ -1155,12 +1179,44 @@ run_jobs() {
 
 # stdin is a single job that no planning applies to: there is no file to
 # classify, no directory to scan and nothing to refuse to overwrite.
-case " $* " in
-	*" - "*)
-		engine_convert "$ENGINE" - - "$THEME_DIR"
-		exit $?
-		;;
-esac
+#
+# Position matters, and an earlier version searched the whole argument list for
+# a bare "-" instead. That made `pdfulator doc.md -` -- a file to stdout, the
+# documented way to pipe one document -- read stdin and ignore doc.md, so it
+# hung on a terminal and reported "empty input on stdin" in a pipeline. The
+# input is $1 and the output is $2; a "-" in either place means that stream,
+# and only there.
+#
+# No arguments at all is not a stream either: bare `pdfulator` converts the
+# current directory, so the input defaults to empty rather than to "-" -- the
+# latter made it read stdin, hanging on a terminal and converting nothing in a
+# script.
+_in=${1:-}
+_out=${2:-}
+
+if [ "$_in" = "-" ]; then
+	# Nothing but "-" (and optionally an output) can follow: there is one
+	# document on stdin, so a second argument naming another input is a
+	# mistake worth reporting rather than silently dropping.
+	engine_convert "$ENGINE" - "${_out:--}" "$THEME_DIR"
+	exit $?
+fi
+
+# A file (or directory) to stdout. Planning still applies to the input side --
+# it must exist and be something convertible -- but there is no output path to
+# classify, and a directory cannot be written to one stream.
+if [ "$_out" = "-" ]; then
+	if [ -d "$_in" ]; then
+		echo "pdfulator: $_in is a directory; only one document can go to stdout." >&2
+		exit 1
+	fi
+	if [ ! -f "$_in" ]; then
+		echo "pdfulator: no such file: $_in" >&2
+		exit 1
+	fi
+	engine_convert "$ENGINE" "$_in" - "$THEME_DIR"
+	exit $?
+fi
 
 if [ "$watch" = 1 ]; then
 	# Watch is directory-only: watching one file and rewriting one PDF is what
