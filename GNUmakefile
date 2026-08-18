@@ -1,17 +1,24 @@
-TAG    = tomgidden/pdfulator:2
 PREFIX = $(HOME)/.local
 SHARE  = $(PREFIX)/share/pdfulator
 
-EXTRA_DOCKER_OPTS ?=
+# The image is the vivlio-docker engine's, and the engine is where its name is
+# recorded -- so the tag comes out of engine.conf rather than being repeated
+# here. Two places to change a tag is one place to forget.
+DOCKER_ENGINE = vivlio-docker
+TAG = $(shell sed -n 's/^image=//p' engines/$(DOCKER_ENGINE)/engine.conf | head -1)
 
+# THEME= and DEBUG= become wrapper switches rather than docker options. The old
+# rules bolted `-v $(THEME):/app/theme` onto the container directly, which the
+# local (non-docker) rules could not use at all -- so `make THEME=x foo.pdf`
+# and `make THEME=x docker-foo.pdf` meant different things. Going through
+# --theme makes them one thing, and theme resolution stays in lib/theme.sh
+# where the by-name lookup lives.
 ifdef THEME
-EXTRA_DOCKER_OPTS += -v $(abspath $(THEME)):/app/theme
+SWITCHES += --theme $(THEME)
 endif
 
 ifdef DEBUG
-SWITCHES  += -d
-DEBUG_OPTS = -v $(abspath ./pdfulator.js):/app/pdfulator.js \
-             -v $(abspath ./defaults):/app/defaults
+SWITCHES += -d
 endif
 
 PDFS = $(patsubst %.md,%.pdf,$(wildcard *.md))
@@ -29,32 +36,33 @@ watch:
 	./pdfulator.sh --watch $(SWITCHES) .
 
 # Docker conversion
+#
+# Through the wrapper with the container engine selected, not by invoking
+# docker here. The wrapper is what plans jobs, resolves themes and builds the
+# mounts, so `make docker-foo.pdf` and `pdfulator --engine vivlio-docker
+# foo.md` are one code path -- which is the whole point of the refactor. The
+# old rule assembled a sidecar onto stdin with shell and make conditionals,
+# duplicating logic the engine already has and getting it subtly different.
 
 docker-%.pdf: %.md
-	($(if $(wildcard $*.yaml),\
-		echo "---" && cat $*.yaml && printf "\n..." && cat $*.md,\
-		$(if $(wildcard $*.yml),\
-			echo "---" && cat $*.yml && printf "\n..." && cat $*.md,\
-			cat $*.md \
-		) \
-	)) | docker run --rm --init -i \
-		$(EXTRA_DOCKER_OPTS) $(DEBUG_OPTS) \
-		$(TAG) $(SWITCHES) - > $@
+	./pdfulator.sh --engine $(DOCKER_ENGINE) $(SWITCHES) $< $@
 
 docker-watch:
-	docker run --rm --init -it \
-		$(EXTRA_DOCKER_OPTS) $(DEBUG_OPTS) \
-		-v $(abspath .):/in \
-		$(TAG) $(SWITCHES) --watch
+	./pdfulator.sh --engine $(DOCKER_ENGINE) --watch $(SWITCHES) .
 
-# Build & publish Docker image
+# Build & publish the engine's image
+#
+# Built from the repository root with -f, because the image needs the vivlio
+# engine's main.js and lockfile plus the shared defaults/ and theme/, all of
+# which live above the engine directory.
 
 build:
-	docker build -t $(TAG) .
+	docker build -f engines/$(DOCKER_ENGINE)/Dockerfile -t $(TAG) .
 
 release:
 	docker buildx build --push \
 		--platform linux/arm64,linux/amd64 \
+		-f engines/$(DOCKER_ENGINE)/Dockerfile \
 		--tag $(TAG) .
 
 # Distribution tarball
@@ -134,6 +142,7 @@ test-lib:
 	sh tests/browsermatrix.sh
 	sh tests/watchmatrix.sh
 	sh tests/enginematrix.sh
+	sh tests/dockermatrix.sh
 
 # Argument-handling matrices. These need a CHROME_PATH (or a pinned browser);
 # wrapmatrix additionally needs the tarball, since it installs what it tests.
