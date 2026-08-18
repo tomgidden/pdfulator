@@ -408,7 +408,25 @@ async function convert(input, output, themeDir, opts) {
       process.stdout.write(fs.readFileSync(tmpPdf));
     } else {
       fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.renameSync(tmpPdf, output);
+
+      // rename(2) cannot cross filesystems, and the temporary directory is in
+      // $TMPDIR while the output is wherever the user asked for -- commonly a
+      // different one. In a container that is the normal case rather than an
+      // unlucky one: the output directory is a bind mount, so every write to
+      // it crosses a device boundary and the rename fails with EXDEV, having
+      // rendered the document perfectly.
+      //
+      // Copy-then-unlink is the fallback rather than the default because the
+      // rename is what makes the write atomic: a reader never sees a partial
+      // PDF. Copying gives that up, so it is used only where rename cannot
+      // work at all.
+      try {
+        fs.renameSync(tmpPdf, output);
+      } catch (err) {
+        if (err.code !== 'EXDEV') throw err;
+        fs.copyFileSync(tmpPdf, output);
+        fs.unlinkSync(tmpPdf);
+      }
       if (opts.verbose) console.error(`Written: ${output}`);
     }
   } finally {
