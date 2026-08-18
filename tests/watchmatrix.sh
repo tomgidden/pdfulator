@@ -15,8 +15,36 @@ LIB=$(cd "$(dirname "$0")/../lib" && pwd)
 . "$LIB/paths.sh"
 . "$LIB/watch.sh"
 
-BASE=$(printf '%s' "${TMPDIR:-/tmp}" | sed 's|/*$||')/pdfulator-watchmatrix
+# Per-run directory, and every watcher stopped on the way out.
+#
+# A fixed path is fine for the other matrices, which only touch the filesystem
+# synchronously. This one leaves background watchers running, so two concurrent
+# runs -- or one run after another that died before its cleanup -- share a
+# fixture and a log, and each sees the other's conversions as its own. That
+# looks exactly like the flakiness it is not: "quiet directory stays quiet"
+# reporting three hits, in a directory nothing touched.
+BASE=$(printf '%s' "${TMPDIR:-/tmp}" | sed 's|/*$||')/pdfulator-watchmatrix.$$
 FAIL=0
+
+# Whatever happens -- pass, fail, or ^C -- take the watchers down and the
+# directory with them. A leaked watcher polling a deleted directory is not
+# harmful, but it is confusing to find later.
+#
+# PIDs are accumulated by hand rather than taken from `jobs -p`, which is not
+# dependable in a POSIX sh trap: job control is off in non-interactive shells,
+# so the job table may be empty by the time the trap runs.
+WATCHERS=""
+watcher_stop_all() {
+	for _w in $WATCHERS; do
+		kill "$_w" 2>/dev/null
+		# The mechanisms that run as a pipeline (fswatch, inotifywait, and the
+		# subshell reading from them) survive their parent, so the children go
+		# too.
+		pkill -P "$_w" 2>/dev/null
+	done
+	WATCHERS=""
+}
+trap 'watcher_stop_all; rm -rf "$BASE"' EXIT INT TERM
 
 # Poll fast, so the tests take a second rather than ten.
 PDFULATOR_POLL_INTERVAL=0.2
@@ -41,38 +69,38 @@ fixture() {
 # <action> shortly after it starts. Every conversion appends to $BASE/log, so
 # the log is the record of what the watcher reacted to.
 #
-# Waiting for the watcher to be *ready* rather than sleeping a guessed
-# interval. A change made before the first fingerprint is taken is not a change
-# the watcher can see, so the action must not happen until it is watching.
+# This test was flaky for two reasons, and neither was the one it looked like.
+# Recorded because the obvious diagnosis -- "a background test, therefore a
+# timing race, therefore lengthen the sleep" -- was wrong twice, and lengthening
+# the sleep hid the second cause while making the first worse:
 #
-# A fixed `sleep 0.5` was not enough: on a slower host (Docker on a NAS) the
-# baseline was sometimes still being taken, the action landed inside it, and
-# the case failed about 60% of the time -- as a *spurious change detected*,
-# which looks exactly like a real bug in the fallback. A test that cries wolf
-# on slow hardware is worse than no test, since the response is to stop reading
-# it.
+#   1. watch_dir took its baseline *before* running the callback, so everything
+#      a conversion wrote looked like a fresh change. One edit produced four
+#      conversions. Fixed in lib/watch.sh; pinned by CONVERSION FEEDBACK below.
 #
-# Readiness is observed rather than assumed: touch a file the watcher must
-# react to, and wait for the reaction. Once it has fired once, the baseline
-# demonstrably exists.
+#   2. The fixture path was fixed, so two runs of this file shared a directory
+#      and a log -- and this file leaves watchers running. The symptom was a
+#      *quiet* directory reporting three conversions, which reads as a bug in
+#      the watcher rather than as another copy of the test. Fixed by the $$ in
+#      $BASE and the EXIT trap above.
 watch_run() {  # watch_run <timeout> <action>
 	: > "$BASE/log"
 	watch_on_change() { printf 'convert %s\n' "$1" >> "$BASE/log"; }
 
 	watch_dir "$BASE/src" >/dev/null 2>&1 &
 	_wr_pid=$!
+	WATCHERS="$WATCHERS $_wr_pid"
 
-	# Provoke one reaction, and wait up to ~10s for it. The file is removed
-	# afterwards so it cannot affect what the case under test then observes.
-	printf '# warmup\n' > "$BASE/src/zz-warmup.md"
-	_wr_n=0
-	while [ "$(hits)" -eq 0 ] && [ "$_wr_n" -lt 100 ]; do
-		sleep 0.1
-		_wr_n=$((_wr_n + 1))
-	done
-	rm -f "$BASE/src/zz-warmup.md"
-	sleep 0.3            # let the removal settle into a new baseline
-	: > "$BASE/log"      # ...and forget the warmup, so hits() counts this case
+	# A quiet interval for the watcher to take its baseline before the case
+	# acts: a change made before the first fingerprint exists is not one the
+	# watcher can see.
+	#
+	# Several polls' worth, not a guessed wall-clock figure, so the wait scales
+	# with the interval the test is actually running at. Two earlier attempts
+	# used a fixed sleep and a warmup file respectively; both were flaky,
+	# because the real cause was not timing at all but the feedback loop in
+	# watch_dir that CONVERSION FEEDBACK below now pins.
+	sleep 1
 
 	eval "$2"
 	sleep "$1"
@@ -165,6 +193,39 @@ check "ignores irrelevant files" "0" "$(hits)"
 fixture
 watch_run 1.2 "true"
 check "quiet directory stays quiet" "0" "$(hits)"
+
+
+echo "============ CONVERSION FEEDBACK ============"
+# Converting writes files, and `pdfulator --watch dir/` writes them into the
+# directory being watched. If the baseline is taken before the callback rather
+# than after it, everything the conversion produced looks like a fresh change
+# on the next poll: one edit converts, the conversion trips the watcher, and
+# round it goes.
+#
+# Measured before the fix: one edit, four conversions. A callback writing a
+# watched .yaml sidecar would never have stopped at all.
+#
+# This is what made the REACTION cases above flaky, and it is why two attempts
+# to fix them by adjusting the test's timing both failed -- the fault was in
+# watch_dir, not in when the test poked it.
+fixture
+: > "$BASE/log"
+watch_on_change() {
+	# A conversion that takes a moment and writes into the watched directory,
+	# which is what a real one does.
+	sleep 0.4
+	printf 'title: generated\n' > "$BASE/src/a.yaml"
+	printf 'convert\n' >> "$BASE/log"
+}
+watch_dir "$BASE/src" >/dev/null 2>&1 &
+FB_PID=$!
+WATCHERS="$WATCHERS $FB_PID"
+sleep 1
+printf '# Edited once\n' > "$BASE/src/a.md"
+sleep 3
+kill "$FB_PID" 2>/dev/null; wait "$FB_PID" 2>/dev/null
+pkill -P "$FB_PID" 2>/dev/null
+check "one edit converts once" "1" "$(hits)"
 
 echo
 [ "$FAIL" -eq 0 ] && echo "ALL EXPECTATIONS MET" || echo "SOME EXPECTATIONS MISSED"

@@ -82,12 +82,32 @@ watch_is_relevant() {  # watch_is_relevant <path>
 # event. Sub-second makes it negligible rather than routine, and the watchers
 # proper (fswatch, inotifywait) do not have it at all -- which is why they are
 # preferred when present.
+# Which stat(1) is this? Decided once, by trying the GNU form on a file that
+# certainly exists, rather than per call.
+#
+# A try-each-and-fall-through chain does NOT work here, and the way it fails is
+# nasty: to GNU stat, `-f` is not an unknown option but "show *filesystem*
+# status", so `stat -f %Fm file` succeeds and prints a block-and-inode report.
+# That went into the fingerprint, free-block counts and all, and those drift on
+# a live filesystem -- so watch mode saw phantom changes in a directory nobody
+# had touched. On Debian in Docker this failed ~85% of runs; on macOS, where
+# BSD stat is the first match anyway, never.
+#
+# `-c` is the discriminator because BSD stat has no such flag and genuinely
+# rejects it, while GNU accepts both spellings of `-f`.
+# Probed against `/` rather than $0, which is the *sourcing* script and may be
+# "sh", "-", or absent depending on how the caller was invoked.
+if stat -c %Y -- / >/dev/null 2>&1; then
+	WATCH_STAT=gnu
+else
+	WATCH_STAT=bsd
+fi
+
 watch_mtime() {  # watch_mtime <file>
-	stat -f %Fm -- "$1" 2>/dev/null && return 0
-	stat -c %.9Y -- "$1" 2>/dev/null && return 0
-	stat -f %m  -- "$1" 2>/dev/null && return 0
-	stat -c %Y  -- "$1" 2>/dev/null && return 0
-	printf '0\n'
+	case $WATCH_STAT in
+		gnu) stat -c %.9Y -- "$1" 2>/dev/null || stat -c %Y -- "$1" 2>/dev/null ;;
+		*)   stat -f %Fm  -- "$1" 2>/dev/null || stat -f %m  -- "$1" 2>/dev/null ;;
+	esac || printf '0\n'
 }
 
 watch_fingerprint() {  # watch_fingerprint <dir>
@@ -147,13 +167,29 @@ watch_dir() {  # watch_dir <dir>
 			;;
 
 		poll)
+			# The baseline is retaken *after* the callback, not before it.
+			#
+			# Converting writes files, and `pdfulator --watch dir/` writes them
+			# into the very directory being watched. Fingerprinting before the
+			# callback means everything it produced looks like a fresh change
+			# on the next poll -- so one edit converts, the conversion trips the
+			# watcher, and round it goes. Measured: one edit produced four
+			# conversions with a callback that wrote a sidecar, and a callback
+			# writing a watched .yaml would never stop.
+			#
+			# PDFs are not in the fingerprint (watch_is_relevant excludes them),
+			# which is why this stayed hidden -- but sidecars are, deliberately,
+			# and anything slow enough to overlap the next poll re-triggers
+			# regardless of what it wrote.
 			_wd_prev=$(watch_fingerprint "$_wd_dir")
 			while :; do
 				sleep "$PDFULATOR_POLL_INTERVAL"
 				_wd_now=$(watch_fingerprint "$_wd_dir")
 				if [ "$_wd_now" != "$_wd_prev" ]; then
-					_wd_prev=$_wd_now
 					watch_on_change "$_wd_dir"
+					# Whatever the conversion just wrote is part of the new
+					# normal, not the next change.
+					_wd_prev=$(watch_fingerprint "$_wd_dir")
 				fi
 			done
 			;;
