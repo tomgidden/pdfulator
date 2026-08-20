@@ -227,6 +227,166 @@ kill "$FB_PID" 2>/dev/null; wait "$FB_PID" 2>/dev/null
 pkill -P "$FB_PID" 2>/dev/null
 check "one edit converts once" "1" "$(hits)"
 
+echo "============ EVENT WATCHERS ============"
+# fswatch and inotifywait, without either being installed.
+#
+# Neither is present on a stock macOS or in a Docker image, so before this
+# section the event branches were never executed anywhere -- not here, not in
+# CI -- while being what most developer machines actually select. Both had the
+# conversion-feedback loop that d6b0369 fixed for polling, plus an unfiltered
+# event stream: watch_is_relevant was consulted only by watch_fingerprint, so
+# under fswatch a written .pdf triggered a full re-plan.
+#
+# The stubs stand in for the real tools at the only interface watch_dir uses:
+# a line on stdout per event. That is the whole contract -- watch_dir ignores
+# the content of the line and re-plans from the directory -- so a stub exercises
+# the branch as faithfully as the tool would, and does it identically on every
+# platform. What it cannot test is whether the real tools notice a given
+# filesystem change; that is their job and they have their own test suites.
+#
+# The stubs live *beside* $BASE rather than inside it: fixture() does
+# `rm -rf "$BASE"`, so a $BASE/stubs is deleted before the first case that
+# needs it. That failure is quiet and misleading -- PATH then names a missing
+# directory, the real tool is absent too, and every positive case reports "no
+# reaction" while every negative case passes for having run nothing at all.
+STUBS=$BASE.stubs
+mkdir -p "$STUBS"
+trap 'watcher_stop_all; rm -rf "$BASE" "$STUBS"' EXIT INT TERM
+
+# Both stubs poll internally and print a line per change, which is what the
+# real tools do from the kernel. The point is not how they detect a change but
+# that watch_dir reacts correctly to the events, including events it should
+# ignore.
+cat > "$STUBS/fswatch" <<'STUB'
+#!/bin/sh
+# Stand-in for `fswatch -o <dir>`: a count per batch of changes.
+dir=""
+for a in "$@"; do case $a in -*) ;; *) dir=$a ;; esac; done
+prev=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+while :; do
+	sleep 0.1
+	now=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+	if [ "$now" != "$prev" ]; then printf '1\n'; prev=$now; fi
+done
+STUB
+
+cat > "$STUBS/inotifywait" <<'STUB'
+#!/bin/sh
+# Stand-in for `inotifywait -q -m -e ... <dir>`: "<dir> <EVENT> <file>".
+dir=""
+for a in "$@"; do case $a in -*) ;; *) dir=$a ;; esac; done
+prev=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+while :; do
+	sleep 0.1
+	now=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+	if [ "$now" != "$prev" ]; then printf '%s/ CLOSE_WRITE,CLOSE x\n' "$dir"; prev=$now; fi
+done
+STUB
+
+chmod +x "$STUBS/fswatch" "$STUBS/inotifywait"
+PATH=$STUBS:$PATH
+export PATH
+
+# PDFULATOR_WATCH forces the branch. Without it the stubs would be found by
+# watch_mechanism anyway, but only in the preference order -- inotifywait would
+# never run on a machine where the fswatch stub exists, which is every machine
+# running this file.
+for MECH in fswatch inotifywait; do
+	PDFULATOR_WATCH=$MECH
+	export PDFULATOR_WATCH
+
+	check "$MECH is selected when forced" "$MECH" "$(watch_mechanism)"
+
+	fixture
+	watch_run 1.5 "printf '# Edited\n' > '$BASE/src/a.md'"
+	check "$MECH reacts to an edit" "yes" "$([ "$(hits)" -ge 1 ] && echo yes || echo no)"
+
+	fixture
+	watch_run 1.5 "printf 'title: Changed\n' > '$BASE/src/a.yaml'"
+	check "$MECH reacts to a sidecar edit" "yes" \
+	      "$([ "$(hits)" -ge 1 ] && echo yes || echo no)"
+
+	# The event branches saw every file in the directory, relevant or not:
+	# watch_is_relevant was reached only through watch_fingerprint. A .txt --
+	# or an editor's swap file, or a .pdf just written -- meant a full re-plan,
+	# and for a container engine a cold container start.
+	fixture
+	watch_run 1.5 "printf 'noise\n' > '$BASE/src/scratch.txt'"
+	check "$MECH ignores irrelevant files" "0" "$(hits)"
+
+	# A PDF specifically, because that is what a conversion writes into the
+	# directory it is watching -- the feedback loop's first hop.
+	fixture
+	watch_run 1.5 "printf '%%PDF-1.4\n' > '$BASE/src/a.pdf'"
+	check "$MECH ignores a written PDF" "0" "$(hits)"
+
+	fixture
+	watch_run 1.2 "true"
+	check "$MECH stays quiet when nothing happens" "0" "$(hits)"
+
+	# The loop this section exists for. The callback writes a *watched* file
+	# (a sidecar, as a real conversion may), so the conversion's own output is
+	# itself an event. Before the fix this never terminated: each conversion
+	# triggered the next.
+	#
+	# It also pins the subshell trap. The event branches read from a fifo
+	# rather than a pipe so the loop body stays in this shell; written as
+	# `watcher | while read`, watch_react's baseline would be set in a
+	# subshell and lost on every event, and this case would count 2 or more.
+	fixture
+	: > "$BASE/log"
+	watch_on_change() {
+		sleep 0.4
+		printf 'title: generated\n' > "$BASE/src/a.yaml"
+		printf 'convert\n' >> "$BASE/log"
+	}
+	watch_dir "$BASE/src" >/dev/null 2>&1 &
+	FB_PID=$!
+	WATCHERS="$WATCHERS $FB_PID"
+	sleep 1
+	printf '# Edited once\n' > "$BASE/src/a.md"
+	sleep 3
+	kill "$FB_PID" 2>/dev/null; wait "$FB_PID" 2>/dev/null
+	pkill -P "$FB_PID" 2>/dev/null
+	check "$MECH converts once per edit" "1" "$(hits)"
+done
+
+unset PDFULATOR_WATCH
+
+
+echo "============ REAL WATCHERS ============"
+# The stubs above prove the branch logic. This proves the invocation itself:
+# that `fswatch -o <dir>` and `inotifywait -q -m -e ... <dir>` are spelled
+# correctly and emit a line per change. A stub cannot show that, since it
+# accepts whatever flags it is handed.
+#
+# Skipped when the tool is absent, which is the normal case on macOS without
+# Homebrew and in a Docker image. CI is where these should actually run.
+PATH=$(printf '%s' "$PATH" | sed "s|^$STUBS:||")
+export PATH
+
+for MECH in fswatch inotifywait; do
+	if ! command -v "$MECH" >/dev/null 2>&1; then
+		echo "skip  $MECH is not installed here"
+		continue
+	fi
+
+	PDFULATOR_WATCH=$MECH
+	export PDFULATOR_WATCH
+
+	fixture
+	watch_run 2 "printf '# Edited\n' > '$BASE/src/a.md'"
+	check "real $MECH reacts to an edit" "yes" \
+	      "$([ "$(hits)" -ge 1 ] && echo yes || echo no)"
+
+	fixture
+	watch_run 2 "printf 'noise\n' > '$BASE/src/scratch.txt'"
+	check "real $MECH ignores irrelevant files" "0" "$(hits)"
+
+	unset PDFULATOR_WATCH
+done
+
+
 echo
 [ "$FAIL" -eq 0 ] && echo "ALL EXPECTATIONS MET" || echo "SOME EXPECTATIONS MISSED"
 exit $FAIL
