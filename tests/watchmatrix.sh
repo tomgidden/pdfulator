@@ -227,6 +227,62 @@ kill "$FB_PID" 2>/dev/null; wait "$FB_PID" 2>/dev/null
 pkill -P "$FB_PID" 2>/dev/null
 check "one edit converts once" "1" "$(hits)"
 
+echo "============ NON-REPRODUCIBLE OUTPUT ============"
+# An engine whose output differs on every run, which is the normal case rather
+# than the exception: the vivlio engine stamps /CreationDate and /ModDate into
+# every PDF, so converting the same document twice gives two different files.
+#
+# The feedback loop would otherwise be permanent rather than transient. A
+# conversion writes a PDF, the PDF differs from the last one, the difference
+# reads as a change, and round it goes forever -- no edit required, and no
+# up-to-date check to stop it, since the source really is newer than nothing.
+#
+# What saves it is that watch_is_relevant excludes .pdf, so PDFs never enter
+# the fingerprint at all and a timestamp inside one is invisible. That is a
+# property worth pinning rather than assuming: it is the single thing standing
+# between "watch mode" and "convert forever", and it would be undone by anyone
+# adding .pdf to the relevance list for a plausible-sounding reason.
+#
+# Harsher than reality on purpose -- the fixture changes the PDF's *size* as
+# well as its content, so a fingerprint that noticed either would trip.
+for MECH in poll fswatch; do
+	PDFULATOR_WATCH=$MECH
+	export PDFULATOR_WATCH
+
+	fixture
+	: > "$BASE/log"
+	watch_on_change() {
+		sleep 0.3
+		printf '%%PDF-1.4 generated at %s %s\n' "$(date +%s)" "$$" \
+			> "$BASE/src/a.pdf"
+		printf 'convert\n' >> "$BASE/log"
+	}
+	watch_dir "$BASE/src" >/dev/null 2>&1 &
+	ND_PID=$!
+	WATCHERS="$WATCHERS $ND_PID"
+	sleep 1
+	printf '# Edited once\n' > "$BASE/src/a.md"
+	sleep 3
+	kill "$ND_PID" 2>/dev/null; wait "$ND_PID" 2>/dev/null
+	pkill -P "$ND_PID" 2>/dev/null
+	check "$MECH: a timestamped PDF does not re-trigger" "1" "$(hits)"
+done
+unset PDFULATOR_WATCH
+
+# The sidecar is the case with no such protection, and it is deliberate: .yaml
+# is watched, because editing one changes the output while the markdown is
+# untouched. So an engine that *wrote* a sidecar on every conversion -- with a
+# timestamp, or any changing content -- would loop forever, and nothing here
+# would stop it.
+#
+# No engine does today, and none should: sidecars are input. Recorded as a
+# constraint on future engines rather than as a defect, since the alternative
+# (dropping .yaml from the fingerprint) breaks the metadata-edit case that the
+# RELEVANCE section exists to protect.
+check "sidecars are watched, so engines must not write them" "0" \
+      "$(watch_is_relevant a.yaml; echo $?)"
+
+
 echo "============ EVENT WATCHERS ============"
 # fswatch and inotifywait, without either being installed.
 #
