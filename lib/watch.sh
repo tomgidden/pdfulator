@@ -122,7 +122,17 @@ watch_fingerprint() {  # watch_fingerprint <dir>
 
 # Which watcher to use. Split out so the tests can see the choice being made
 # without having to install anything.
+#
+# PDFULATOR_WATCH overrides the choice. That exists for the tests -- which must
+# be able to exercise all three branches on a machine that has none of the
+# tools, and in CI, where installing them per platform to test them is a poor
+# trade -- but it is also the escape hatch for a user whose fswatch misbehaves
+# on some exotic filesystem. `poll` works everywhere by construction.
 watch_mechanism() {
+	case ${PDFULATOR_WATCH:-} in
+		fswatch|inotifywait|poll) printf '%s\n' "$PDFULATOR_WATCH"; return 0 ;;
+	esac
+
 	if command -v fswatch >/dev/null 2>&1; then
 		printf 'fswatch\n'
 	elif command -v inotifywait >/dev/null 2>&1; then
@@ -130,6 +140,80 @@ watch_mechanism() {
 	else
 		printf 'poll\n'
 	fi
+}
+
+
+# One change, as seen by an event watcher: react only if something relevant
+# actually differs from the last time we looked.
+#
+# This is what the event branches were missing, and it is the same rule the
+# poll branch gets from comparing fingerprints. Two distinct problems, one
+# answer:
+#
+#   1. The watchers report *every* file in the directory. `watch_is_relevant`
+#      was only ever consulted by watch_fingerprint, so it filtered polling
+#      alone: under fswatch, a written .pdf -- or a .txt, or an editor's swap
+#      file -- triggered a full re-plan.
+#
+#   2. Converting writes into the directory being watched, so the conversion's
+#      own output is itself an event. The poll branch re-baselines afterwards;
+#      an event watcher has no baseline to retake, so it would go round again.
+#
+# Comparing the fingerprint after each event settles both, without debouncing
+# or an ignore window. A timer would have had to be longer than the slowest
+# conversion (a cold container start is seconds) while still being shorter than
+# a human's next keystroke -- no such interval exists. Fingerprints answer the
+# question that actually matters, which is not "how long ago" but "is anything
+# different now".
+#
+# The cost is one stat(1) per relevant file per event, which is what polling
+# already pays every interval.
+watch_react() {  # watch_react <dir>
+	_wr_now=$(watch_fingerprint "$1")
+	if [ "$_wr_now" = "${_wd_prev:-}" ]; then return 0; fi
+
+	watch_on_change "$1"
+
+	# Whatever the conversion just wrote is the new normal, not the next
+	# change -- the same re-baselining the poll branch does, and for the same
+	# reason.
+	_wd_prev=$(watch_fingerprint "$1")
+}
+
+
+# Run an event watcher, reacting in *this* shell rather than in a subshell.
+#
+#   watch_via_fifo <dir> <watcher> [args...]
+#
+# The obvious spelling, `watcher | while read`, puts the loop body in a
+# subshell, where watch_react's baseline lives and dies -- see the comment in
+# watch_dir. Redirecting a named pipe into the loop instead keeps the body
+# here, so the baseline survives from one event to the next.
+#
+# Not a process substitution (`while read; do ...; done < <(watcher)`), which
+# is bash and ksh only; this file is POSIX sh, and Debian's /bin/sh is dash.
+watch_via_fifo() {  # watch_via_fifo <dir> <watcher> [args...]
+	_wvf_dir=$1
+	shift
+
+	_wvf_tmp=$(mktemp -d "${TMPDIR:-/tmp}/pdfulator-watch.XXXXXX") || return 1
+	_wvf_fifo=$_wvf_tmp/events
+	mkfifo "$_wvf_fifo" || { rm -rf "$_wvf_tmp"; return 1; }
+
+	"$@" > "$_wvf_fifo" &
+	_wvf_pid=$!
+
+	# The watcher outlives this function otherwise: it is a background child
+	# blocked on a pipe nobody is reading, and ^C reaches the shell without
+	# reaching it. Interrupts included, since watch mode's normal end is ^C.
+	trap 'kill "$_wvf_pid" 2>/dev/null; rm -rf "$_wvf_tmp"' EXIT INT TERM
+
+	while read -r _; do
+		watch_react "$_wvf_dir"
+	done < "$_wvf_fifo"
+
+	kill "$_wvf_pid" 2>/dev/null
+	rm -rf "$_wvf_tmp"
 }
 
 
@@ -145,14 +229,27 @@ watch_mechanism() {
 watch_dir() {  # watch_dir <dir>
 	_wd_dir=$1
 
+	# The baseline every branch compares against. Taken before the watcher
+	# starts, so a change made while it was still warming up is still seen.
+	_wd_prev=$(watch_fingerprint "$_wd_dir")
+
 	case $(watch_mechanism) in
 		fswatch)
 			# -o batches events into a count, so a save that fires several
-			# events (editors commonly write, rename and chmod) runs one
-			# conversion rather than three.
-			fswatch -o "$_wd_dir" | while read -r _; do
-				watch_on_change "$_wd_dir"
-			done
+			# events (editors commonly write, rename and chmod) arrives as one
+			# line rather than three.
+			#
+			# The loop body is NOT on the right of the pipe. A `while read`
+			# there runs in a subshell, and watch_react keeps its baseline in
+			# _wd_prev -- which would be set in the subshell, discarded when it
+			# exits, and restored to the pre-watch value on the next event. The
+			# feedback loop would come straight back, and only under fswatch:
+			# exactly the sort of divergence between branches that this file
+			# has been bitten by before (see run_jobs, and lib/browser.sh).
+			#
+			# A named pipe keeps the loop in this shell. `read` blocks on it
+			# just as it would on the pipe, so nothing else changes.
+			watch_via_fifo "$_wd_dir" fswatch -o "$_wd_dir"
 			;;
 
 		inotifywait)
@@ -160,37 +257,31 @@ watch_dir() {  # watch_dir <dir>
 			# fires modify repeatedly, and converting a half-written file
 			# produces a broken PDF and an alarming error. moved_to catches
 			# the write-to-temp-and-rename that many editors do instead.
-			inotifywait -q -m -e close_write,moved_to,delete "$_wd_dir" |
-				while read -r _; do
-					watch_on_change "$_wd_dir"
-				done
+			#
+			# Same subshell problem as fswatch, same answer.
+			watch_via_fifo "$_wd_dir" \
+				inotifywait -q -m -e close_write,moved_to,delete "$_wd_dir"
 			;;
 
 		poll)
-			# The baseline is retaken *after* the callback, not before it.
+			# A tick is just an event with no watcher behind it, so the same
+			# watch_react decides whether anything came of it.
 			#
-			# Converting writes files, and `pdfulator --watch dir/` writes them
-			# into the very directory being watched. Fingerprinting before the
-			# callback means everything it produced looks like a fresh change
-			# on the next poll -- so one edit converts, the conversion trips the
-			# watcher, and round it goes. Measured: one edit produced four
-			# conversions with a callback that wrote a sidecar, and a callback
-			# writing a watched .yaml would never stop.
+			# The rule it applies -- react only if the fingerprint moved, then
+			# re-baseline -- started here, as the fix for the feedback loop
+			# (d6b0369): converting writes into the very directory being
+			# watched, so fingerprinting before the callback made everything
+			# the conversion produced look like a fresh change. One edit
+			# produced four conversions, and a callback writing a watched
+			# .yaml never stopped at all.
 			#
-			# PDFs are not in the fingerprint (watch_is_relevant excludes them),
-			# which is why this stayed hidden -- but sidecars are, deliberately,
-			# and anything slow enough to overlap the next poll re-triggers
-			# regardless of what it wrote.
-			_wd_prev=$(watch_fingerprint "$_wd_dir")
+			# PDFs are not in the fingerprint (watch_is_relevant excludes
+			# them), which is why it stayed hidden -- but sidecars are,
+			# deliberately, and anything slow enough to overlap the next poll
+			# re-triggers regardless of what it wrote.
 			while :; do
 				sleep "$PDFULATOR_POLL_INTERVAL"
-				_wd_now=$(watch_fingerprint "$_wd_dir")
-				if [ "$_wd_now" != "$_wd_prev" ]; then
-					watch_on_change "$_wd_dir"
-					# Whatever the conversion just wrote is part of the new
-					# normal, not the next change.
-					_wd_prev=$(watch_fingerprint "$_wd_dir")
-				fi
+				watch_react "$_wd_dir"
 			done
 			;;
 	esac
