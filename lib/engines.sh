@@ -234,6 +234,118 @@ engines_deps_ready() {
 }
 
 
+# --- First-run preparation ---------------------------------------------------
+#
+# An engine's own tools -- pandoc, pagedjs-cli, a FOP jar, an API endpoint --
+# are fetched on first use rather than shipped, so the distribution stays one
+# small tarball and a user downloads only what the engines they actually run
+# require.
+#
+# The division of labour is the point, and it is not the obvious one. Anything
+# two engines could share is the *wrapper's* to fetch: a runtime, a browser,
+# the docker daemon. One bun serves vivlio and every JS engine after it; one
+# Chromium serves vivlio and the non-container pagedjs engine to come. If each
+# engine fetched its own, two engines would race to install the same copy and
+# a user would pay twice for one download. Those live in pdfulator.sh, beside
+# the needs_runtime/needs_browser/needs_docker checks that already act on them.
+#
+# What is left is what only this engine could want, and that is `prepare`:
+#
+#   engines/<id>/prepare        optional, executable, no arguments
+#
+# It runs with the environment `convert` gets -- $PDFULATOR_RUNTIME,
+# $CHROME_PATH, $PDFULATOR_DOCKER are already settled by the time it is called,
+# which is exactly why the shared resources belong to the wrapper. Exit 0 means
+# ready.
+#
+# The rule for a new engine, in one line: if two engines could want the same
+# copy, the wrapper fetches it; otherwise `prepare` does.
+
+# Where "this engine has been prepared" is recorded.
+#
+# Under $PDFULATOR_HOME, not in the engine's own directory. An engine directory
+# is shipped content, and --uninstall tells shipped files from user-modified
+# ones by hash: a stamp written next to `convert` would make the engine look
+# edited and would survive an uninstall that should have taken it.
+engine_stamp() {  # engine_stamp <id>
+	printf '%s/.prepared/%s\n' "$PDFULATOR_HOME" "$1"
+}
+
+
+# Is this engine ready to convert?
+#
+# The stamp holds the version that prepared it, so an --update invalidates
+# every engine at once: a new release may pin a different pandoc or a different
+# image tag, and the alternative is each `prepare` inventing its own freshness
+# check. Re-preparing after an update is cheap when nothing changed -- a
+# `docker pull` of a current image is a no-op -- and correct when it did.
+engine_prepared() {  # engine_prepared <id>
+	_ep_file=$(engine_stamp "$1")
+	[ -s "$_ep_file" ] || return 1
+	[ "$(head -1 "$_ep_file" | tr -d ' \t\r')" = "$(engine_prepare_version)" ]
+}
+
+
+# What a stamp is compared against. Split out so tests can pin it, and so the
+# lookup has one home rather than being repeated at both call sites.
+engine_prepare_version() {
+	if [ -n "${PDFULATOR_PREPARE_VERSION:-}" ]; then
+		printf '%s\n' "$PDFULATOR_PREPARE_VERSION"
+	elif [ -s "${VERSION_FILE:-}" ]; then
+		head -1 "$VERSION_FILE" | tr -d ' \t\r'
+	else
+		printf 'unknown\n'
+	fi
+}
+
+
+# Run an engine's first-run setup, at most once per version.
+#
+# `force` re-runs regardless of the stamp: that is `--prepare` said out loud,
+# for a user about to go offline or one whose half-finished download needs
+# retrying.
+#
+# An engine with no `prepare` is ready by definition -- most are. That is not
+# an error and not a warning; it is the common case, and the stamp is still
+# written so the answer is settled without a stat of the engine directory on
+# every run.
+engine_prepare() {  # engine_prepare <id> [force]
+	_epr_id=$1
+	_epr_force=${2:-}
+
+	# The escape hatch for CI and for the test matrices, which have no network
+	# and no business fetching anything. An explicit `force` -- which is
+	# `--prepare` -- overrides it: the variable guards against preparing by
+	# accident, and asking for it is not an accident.
+	if [ -n "${PDFULATOR_NO_PREPARE:-}" ] && [ -z "$_epr_force" ]; then
+		return 0
+	fi
+
+	if [ -z "$_epr_force" ] && engine_prepared "$_epr_id"; then return 0; fi
+
+	_epr_script="$ENGINES_DIR/$_epr_id/prepare"
+	if [ -x "$_epr_script" ]; then
+		printf 'Preparing the %s engine...\n' "$_epr_id" >&2
+		PDFULATOR_HOME="$PDFULATOR_HOME" \
+		PDFULATOR_DEFAULTS="${PDFULATOR_DEFAULTS:-$PDFULATOR_DIR/defaults}" \
+			"$_epr_script" || {
+				# Fatal, not a warning. The engine has said it is not ready,
+				# and running `convert` anyway trades one clear message for a
+				# failure further in -- or, worse, a PDF rendered with
+				# whatever was left over from a previous attempt.
+				engines_error "the $_epr_id engine could not complete setup."
+				return 1
+			}
+	fi
+
+	# Only on success, so a failed run is retried next time rather than being
+	# recorded as done.
+	mkdir -p -- "$(dirname -- "$(engine_stamp "$_epr_id")")" || return 1
+	engine_prepare_version > "$(engine_stamp "$_epr_id")"
+	return 0
+}
+
+
 # Run one conversion.
 #
 # The environment is the interface: CHROME_PATH and PDFULATOR_RUNTIME are

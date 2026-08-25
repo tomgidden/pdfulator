@@ -19,6 +19,7 @@
 #   --install                            choose a runtime and browser (asks)
 #   --browser auto|find|install|<path>   choose a browser (remembered)
 #   --install-runtime                    download bun if none is installed
+#   --prepare                            fetch what the chosen engine needs
 #   --setup-status                       report what is still needed
 #   --update [--check|--yes|--force]     fetch and install a newer release
 #   --version                            report the installed version
@@ -402,7 +403,7 @@ for arg in "$@"; do
 	case $arg in
 		# Wrapper subcommands. Mutually exclusive; last one wins is not a
 		# useful behaviour, so refuse rather than guess.
-		--uninstall|--setup-status|--install|--update|--version)
+		--uninstall|--setup-status|--install|--update|--version|--prepare)
 			if [ -n "$command" ]; then
 				echo "pdfulator: $arg and --$command can't be combined" >&2
 				exit 1
@@ -803,6 +804,16 @@ if [ "$command" = "setup-status" ]; then
 	engines_deps_ready ||
 		echo "Dependencies will be installed on first use." >&2
 
+	# Likewise for what the chosen engine fetches for itself. Worth saying
+	# because it may be a large download (a container image is hundreds of
+	# megabytes) and because --prepare lets it happen now, on a connection the
+	# user has, rather than during the first conversion on one they haven't.
+	status_engine=$(engine_resolve "" 2>/dev/null) || status_engine=""
+	if [ -n "$status_engine" ] && ! engine_prepared "$status_engine"; then
+		echo "The $status_engine engine will fetch what it needs on first use" >&2
+		echo "  pdfulator --prepare                    do that now instead" >&2
+	fi
+
 	[ "$need" = 0 ] && echo "Ready to convert." >&2
 	exit 0
 fi
@@ -845,6 +856,9 @@ if [ "$command" = "uninstall" ]; then
 	# Engines keep their own node_modules now, so removing the top-level one
 	# is no longer enough to leave a clean tree.
 	rm -rf "$PDFULATOR_HOME"/engines/*/node_modules
+	# Which engines have been prepared: a record of downloads, not the
+	# downloads themselves, and meaningless once the engines are gone.
+	rm -rf "$PDFULATOR_HOME/.prepared"
 	rm -f "$STAMP" "$MANIFEST" "$BROWSER_CONF" "$RUNTIME_CONF"
 
 	# Prune directories that are now empty. -depth so children are considered
@@ -1065,6 +1079,7 @@ Setup:
       --browser install     download a private browser (~193MB)
       --browser <path>      use this browser (remembered)
       --install-runtime     download bun if it isn't installed
+      --prepare             fetch what the chosen engine needs, now
       --setup-status        report what is still needed
       --update              install a newer release, if there is one
       --version             report the installed version
@@ -1080,14 +1095,22 @@ if [ "$list_engines" = 1 ]; then
 fi
 
 # A bare `--browser <path>` or `--engine <id>` with nothing to convert is just
-# configuration.
-[ $# -eq 0 ] && { [ -n "$browser" ] || [ -n "$engine" ]; } && exit 0
+# configuration. --prepare has no arguments either, but it is not configuration
+# -- it has work to do below, so it must not be caught here.
+if [ "$command" != "prepare" ]; then
+	[ $# -eq 0 ] && { [ -n "$browser" ] || [ -n "$engine" ]; } && exit 0
+fi
 
 
 # --- Dispatch ----------------------------------------------------------------
 #
 # The shape this whole refactor was for: plan the jobs, then hand each one to
 # an engine. Everything above settled *what* to do; the engine only converts.
+#
+# --prepare runs this same path and stops before the planning: fetching an
+# engine's dependencies needs the runtime, browser and daemon settled exactly
+# as a conversion does, and a separate handler would be a second copy of the
+# block below, free to drift from it.
 
 ENGINE=$(engine_resolve "$engine") || exit 1
 [ -n "$engine" ] && { engine_pin "$engine" || exit 1; }
@@ -1147,7 +1170,34 @@ if engine_needs_docker "$ENGINE"; then
 		exit 1
 	fi
 	export PDFULATOR_DOCKER="$DOCKER_CMD"
+
+	# The image itself, before the first conversion rather than during it.
+	# lib/container.sh owns this because it owns the image= lookup, and it is
+	# the wrapper that calls it because every container engine wants the same
+	# thing -- the same rule that keeps the runtime and the browser out here.
+	#
+	# $PDFULATOR_NO_PREPARE suppresses it, except when the user asked for a
+	# preparation outright: the variable exists so tests and CI don't reach the
+	# network by accident, and `--prepare` is not an accident.
+	if [ -z "${PDFULATOR_NO_PREPARE:-}" ] || [ "$command" = "prepare" ]; then
+		. "$PDFULATOR_DIR/lib/container.sh"
+		container_pull "$PDFULATOR_DIR/engines/$ENGINE" "$ENGINE" || exit 1
+	fi
 fi
+
+# Whatever else this engine needs that no other engine would share: its own
+# converter, its own jar, its own endpoint. Once per version, after the shared
+# resources above are settled, since a `prepare` may well need them.
+#
+# `--prepare` forces it, ignoring the stamp: that is the flag's entire purpose,
+# for a user about to go offline or one retrying a download that died halfway.
+if [ "$command" = "prepare" ]; then
+	engine_prepare "$ENGINE" force || exit 1
+	echo "The $ENGINE engine is ready." >&2
+	exit 0
+fi
+
+engine_prepare "$ENGINE" || exit 1
 
 PDFULATOR_VERBOSE=$([ "$verbose" = 1 ] && echo 1 || echo "")
 PDFULATOR_DEBUG=$([ "$debug" = 1 ] && echo 1 || echo "")

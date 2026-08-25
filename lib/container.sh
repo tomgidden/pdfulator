@@ -68,6 +68,61 @@ container_image() {  # container_image <engine-dir>
 }
 
 
+# Fetch the image, if it isn't here yet.
+#
+#   container_pull <engine-dir> <engine-id>
+#
+# `docker run` would pull it anyway, which is exactly the problem: the pull
+# happens *during* the conversion, so several hundred megabytes of progress
+# bars arrive on stderr in the middle of a job, interleaved with the engine's
+# own diagnostics -- and a registry that cannot be reached produces a docker
+# error about a manifest rather than a pdfulator one about an engine. Pulling
+# deliberately, before the first conversion, makes the download a thing that
+# happens once and says so.
+#
+# Announced but not asked about. The download is unattended by design: this
+# runs in CI and in scripts, where a prompt is a hang. That matches how
+# node_modules already arrives -- announced, then installed -- and differs from
+# `--browser install` only because that one is a choice between alternatives
+# rather than the single thing this engine needs.
+#
+# Shared here rather than given to each container engine's `prepare`, following
+# the same rule that keeps the runtime and the browser in the wrapper: three
+# engines wanting a `docker pull` is three engines wanting the same code.
+container_pull() {  # container_pull <engine-dir> <engine-id>
+	_cp_dir=$1
+	_cp_name=${2:-container}
+
+	_cp_image=$(container_image "$_cp_dir") || _cp_image=""
+	[ -n "$_cp_image" ] || {
+		printf '%s: no image configured (image= in engine.conf).\n' \
+		       "$_cp_name" >&2
+		return 1
+	}
+
+	_cp_docker=${PDFULATOR_DOCKER:-docker}
+
+	# `image inspect` rather than `images -q`: the latter matches on the
+	# repository, so a *differently tagged* build of the same repository
+	# reports present and the run then pulls mid-conversion anyway.
+	if "$_cp_docker" image inspect "$_cp_image" >/dev/null 2>&1; then
+		return 0
+	fi
+
+	printf 'Fetching the %s image (%s).\n' "$_cp_name" "$_cp_image" >&2
+	printf 'This is a one-off download and may take a while.\n' >&2
+
+	# Progress goes to the terminal rather than being captured: a several
+	# hundred megabyte download with no output looks like a hang.
+	"$_cp_docker" pull "$_cp_image" >&2 || {
+		printf '%s: could not fetch %s.\n' "$_cp_name" "$_cp_image" >&2
+		printf 'Check your connection, or use the bundled engine: pdfulator --engine vivlio\n' >&2
+		return 1
+	}
+	return 0
+}
+
+
 # Convert one document in a container.
 #
 #   container_run <engine-dir> <input|-> <output|-> <theme-dir>

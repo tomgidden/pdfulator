@@ -268,6 +268,79 @@ for _spec in $ENGINES; do
 	      "$(grep -q 'engine vivlio' "$BASE/err" && echo yes || echo no)"
 
 
+	echo "============ PULL ============"
+	# Fetching the image before the first conversion rather than during it.
+	#
+	# `docker run` would pull on its own, which is the problem being solved:
+	# the download then happens mid-job, so several hundred megabytes of
+	# progress arrive on stderr interleaved with the engine's own output, and
+	# an unreachable registry produces a docker error about a manifest instead
+	# of a pdfulator one about an engine.
+	#
+	# A second fake, because these cases need docker to *answer* rather than
+	# just record: whether the image is present is the whole question.
+	pullfix() {  # pullfix — a docker that reports the image present or not
+		fixture
+		cat > "$BASE/bin/docker" <<FAKE
+#!/bin/sh
+printf '%s\n' "\$1" >> "$BASE/calls"
+case \$1 in
+	image) [ -f "$BASE/present" ] && exit 0 || exit 1 ;;
+	pull)  exit \${FAKE_PULL_RC:-0} ;;
+esac
+exit 0
+FAKE
+		chmod +x "$BASE/bin/docker"
+		: > "$BASE/calls"
+		rm -f "$BASE/present"
+		# The engine's convert execs docker directly; container_pull is what is
+		# under test, so it is called on its own.
+		. "$REPO/lib/container.sh"
+	}
+
+	pullfix
+	container_pull "$ENGINE_DIR" "$ENGINE" >/dev/null 2>&1
+	check "an absent image is pulled" "yes" \
+	      "$(grep -qx pull "$BASE/calls" && echo yes || echo no)"
+
+	# `image inspect` rather than `images -q`: the latter matches on the
+	# repository, so a differently *tagged* build of the same repository
+	# reports present and the run pulls mid-conversion after all.
+	pullfix
+	touch "$BASE/present"
+	container_pull "$ENGINE_DIR" "$ENGINE" >/dev/null 2>&1
+	check "a present image is not pulled" "no" \
+	      "$(grep -qx pull "$BASE/calls" && echo yes || echo no)"
+
+	# Announced, not asked about: this runs in CI and in scripts, where a
+	# prompt is a hang. The message has to name the image, since "fetching an
+	# image" during an unrelated command is otherwise unexplained.
+	pullfix
+	ERR=$(container_pull "$ENGINE_DIR" "$ENGINE" 2>&1 >/dev/null)
+	check "the fetch is announced" "yes" \
+	      "$(printf '%s' "$ERR" | grep -qF "$IMAGE" && echo yes || echo no)"
+
+	# A failed pull stops the run. Conversion would otherwise proceed to a
+	# `docker run` that pulls again and fails less clearly.
+	pullfix
+	FAKE_PULL_RC=1 container_pull "$ENGINE_DIR" "$ENGINE" >/dev/null 2>&1
+	check "a failed pull fails" "1" "$?"
+	pullfix
+	ERR=$(FAKE_PULL_RC=1 container_pull "$ENGINE_DIR" "$ENGINE" 2>&1 >/dev/null)
+	check "and names the bundled alternative" "yes" \
+	      "$(printf '%s' "$ERR" | grep -q 'engine vivlio' && echo yes || echo no)"
+
+	# $PDFULATOR_IMAGE points at a local build, and must be what gets checked
+	# for and fetched -- not the tag in engine.conf.
+	pullfix
+	PDFULATOR_IMAGE=my/own:build
+	export PDFULATOR_IMAGE
+	ERR=$(container_pull "$ENGINE_DIR" "$ENGINE" 2>&1 >/dev/null)
+	check "an image override is honoured" "yes" \
+	      "$(printf '%s' "$ERR" | grep -qF 'my/own:build' && echo yes || echo no)"
+	unset PDFULATOR_IMAGE
+
+
 	echo "============ SET -E ============"
 	# The library does not set -e; the wrapper does, and the engine sets it itself.
 	# Three bugs in lib/browser.sh were invisible until the tests ran under it.
