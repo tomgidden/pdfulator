@@ -15,7 +15,6 @@
 # the boundary they are on.
 set -eu
 
-DEFAULTS=/defaults
 ENGINE=/engine
 
 in=${1:--}

@@ -59,9 +59,13 @@ the location of this file.
         <!-- <value>ascii-hex</value> -->
       </filterList>
 
-      <fonts>
-        <directory>/engine/xsl/fonts</directory>
-      </fonts>
+      <!-- No <fonts> here on purpose.
+
+           The fonts belong to the theme, not to the engine, and the wrapper
+           generates a fop-fonts.xconf naming each face explicitly; `render`
+           prefers that file over this one. A <directory> scan made FOP read
+           each face's weight out of its own metadata, so a face declared 700
+           could register as 400 and the document quietly lost its bold. -->
     </renderer>
 
     <renderer mime="application/postscript">

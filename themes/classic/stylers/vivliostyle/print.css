@@ -1,51 +1,21 @@
 /* ==========================================================================
-   pdfulator default print stylesheet
+   themes/classic — vivliostyle
+   ==========================================================================
+
+   The stylesheet pdfulator shipped as defaults/print.css, moved here
+   unchanged apart from two things.
+
+   The @font-face block is gone: fonts.css now generates it from fonts.conf,
+   and a hand-written copy would be a second place for the font list to drift.
+
+   And the three font-family declarations name roles rather than families --
+   var(--pdfulator-body) instead of var(--pdfulator-body). Same fonts, but a
+   theme extending this one can change them without touching any CSS.
+
+   Vivliostyle's DOM differs from Paged.js's, which is why this lives under
+   stylers/ -- see stylers/pagedjs/print.css for the same look, wired to the
+   other renderer's page model.
    ========================================================================== */
-
-/* --------------------------------------------------------------------------
-   Custom fonts
-   -------------------------------------------------------------------------- */
-
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  src: url(texgyrepagella-regular.otf) format('opentype');
-}
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  font-style: italic;
-  src: url(texgyrepagella-italic.otf) format('opentype');
-}
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  font-weight: 600;
-  src: url(texgyrepagella-bold.otf) format('opentype');
-}
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  font-style: italic;
-  font-weight: 600;
-  src: url(texgyrepagella-bolditalic.otf) format('opentype');
-}
-@font-face {
-  font-family: 'Open Sans Variable';
-  font-display: swap;
-  src: url(OpenSans-VariableFont_wdth,wght.ttf) format('truetype');
-}
-@font-face {
-  font-family: 'Open Sans Variable';
-  font-style: italic;
-  font-display: swap;
-  src: url(OpenSans-Italic-VariableFont_wdth,wght.ttf) format('truetype');
-}
-@font-face {
-  font-family: 'Noto Sans Mono Variable';
-  font-display: swap;
-  src: url(NotoSansMono-VariableFont_wdth,wght.ttf) format('truetype');
-}
 
 /* --------------------------------------------------------------------------
    Design tokens
@@ -91,14 +61,14 @@ html {
   }
 
   @bottom-left {
-    font-family: 'Open Sans Variable', sans-serif;
+    font-family: var(--pdfulator-heading);
     font-weight: 600;
     font-size: var(--S0-85);
     content: string(footerLeft);
   }
 
   @bottom-right {
-    font-family: 'Open Sans Variable', sans-serif;
+    font-family: var(--pdfulator-heading);
     font-weight: 600;
     font-size: var(--S0-85);
     content: counter(page);
@@ -158,7 +128,7 @@ body.footer-h4 main h4 {
    -------------------------------------------------------------------------- */
 
 body {
-  font-family: 'TeX Gyre Pagella', Palatino, serif;
+  font-family: var(--pdfulator-body);
   font-optical-sizing: auto;
   font-weight: 400;
   font-style: normal;
@@ -178,7 +148,7 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Open Sans Variable', sans-serif;
+  font-family: var(--pdfulator-heading);
   font-optical-sizing: auto;
   font-weight: 600;
   font-style: normal;
@@ -214,7 +184,7 @@ article > hgroup {
 }
 
 article > hgroup > .doc-title {
-  font-family: 'Open Sans Variable', sans-serif;
+  font-family: var(--pdfulator-heading);
   font-size: var(--S1-75);
   line-height: var(--L2);
   font-weight: 700;
@@ -222,7 +192,7 @@ article > hgroup > .doc-title {
 }
 
 .doc-subtitle {
-  font-family: 'Open Sans Variable', sans-serif;
+  font-family: var(--pdfulator-heading);
   font-size: var(--S1-25);
   font-weight: 400;
   margin: 0;
@@ -354,7 +324,7 @@ dd {
    -------------------------------------------------------------------------- */
 
 pre, code {
-  font-family: 'Noto Sans Mono Variable', monospace;
+  font-family: var(--pdfulator-mono);
   font-size: var(--S0-85);
   line-height: var(--L);
 }

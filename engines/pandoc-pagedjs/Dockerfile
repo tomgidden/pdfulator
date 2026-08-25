@@ -5,7 +5,7 @@
 #   docker build -f engines/pandoc-pagedjs/Dockerfile \
 #                -t tomgidden/pdfulator:pandoc-pagedjs .
 #
-# because it needs the shared defaults/ (the fonts) from above the engine
+# because it needs the themes/ directory from above the engine
 # directory.
 #
 # node rather than a plain Debian base because Paged.js is the awkward
@@ -53,17 +53,15 @@ ENV CHROME_PATH=/usr/bin/chromium
 # that is already present.
 RUN npm install -g --unsafe-perm --ignore-scripts pagedjs-cli
 
-# The shared assets: the fonts, which every engine's stylesheet uses. The
-# engine's own template, filter and stylesheet come next -- those are not
-# shared, and the reason is worth stating: defaults/article.tmpl is a
-# *Mustache* template belonging to the vivlio engine, while this pipeline needs
-# a *pandoc* template. Same name, same ancestry, different syntax; putting both
-# in defaults/ would be a name collision waiting to be found by whoever edits
-# the wrong one.
-COPY defaults /defaults
+# The engine's own template and filter.
+#
+# No fonts and no stylesheet: both now come from the theme the wrapper stages
+# and mounts, which is what lets one theme dress this engine and the browser
+# ones alike. The template stays here because it is a *pandoc* template while
+# the vivlio engine's is *Mustache* -- same ancestry, different syntax, and a
+# theme supplying one supplies it under stylers/pagedjs/.
 COPY engines/pandoc-pagedjs/article.tmpl \
      engines/pandoc-pagedjs/metadata.lua \
-     engines/pandoc-pagedjs/print.css \
      /engine/
 
 # The built-in theme, so the image works with no mounts at all. A user theme

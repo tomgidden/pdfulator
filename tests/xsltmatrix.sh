@@ -60,33 +60,42 @@ echo "============ FOP PATHS ============"
 # and every document renders in Times.
 check "the config base is absolute" "yes" \
       "$(grep -qE '<base>/' "$ENGINE/xsl/fop.xconf" && echo yes || echo no)"
-check "the font directory is absolute" "yes" \
-      "$(grep -qE '<directory>/' "$ENGINE/xsl/fop.xconf" && echo yes || echo no)"
-
-# And they must point at what the Dockerfile actually installs.
-check "the font directory is where the image puts it" "yes" \
-      "$(grep -q '<directory>/engine/xsl/fonts</directory>' "$ENGINE/xsl/fop.xconf" &&
-         grep -q 'COPY engines/pandoc-xslt/xsl *\/engine/xsl' "$ENGINE/Dockerfile" &&
-         echo yes || echo no)"
 
 
 echo "============ FONTS ============"
-# Every family fo.xsl names must actually be present, or FOP substitutes
-# silently. The check is deliberately on the family names in the stylesheet
-# rather than a fixed list, so changing the design fails here rather than in a
-# PDF nobody looks at closely.
-for fam in Figtree NotoSansMono; do
-	if grep -qiE "$(echo "$fam" | sed 's/NotoSansMono/Noto Sans Mono/')" "$ENGINE/xsl/fo.xsl"; then
-		check "$fam is bundled" "yes" \
-		      "$(ls "$ENGINE/xsl/fonts" 2>/dev/null | grep -qi "^$fam" && echo yes || echo no)"
-	fi
+# The engine bundles no fonts at all now, and its fop.xconf scans no directory.
+# Both belong to the theme: the wrapper generates a fop-fonts.xconf with an
+# explicit <font> per face and the engine prefers it (see render). A scanned
+# directory took each face's weight from its own metadata, so a face declared
+# 700 could register as 400 and the document silently lost its bold.
+check "the engine bundles no fonts" "no" \
+      "$([ -d "$ENGINE/xsl/fonts" ] && echo yes || echo no)"
+# Matched with xmllint rather than grep: the word `directory` appears in the
+# comment explaining why the element is absent, and a test that cannot tell an
+# element from prose about it is a test that will lie in one direction or the
+# other.
+check "the shipped config scans no font directory" "0" \
+      "$(xmllint --xpath 'count(//directory)' "$ENGINE/xsl/fop.xconf" 2>/dev/null || echo 0)"
+
+# Every family fo.xsl names must be one FOP is certain to have, because these
+# are only the fallbacks: a theme overrides them, and a theme that does not
+# leaves these to render the document. Naming anything else here is how
+# `Sabon` sat in the stylesheet for years with no font behind it.
+for fam in $(sed -n 's/.*<xsl:param name="[a-z]*\.font\.family">\([^<]*\)<.*/\1/p' \
+             "$ENGINE/xsl/fo.xsl" | sort -u); do
+	case $fam in
+		Times|Helvetica|Courier|Symbol|ZapfDingbats)
+			check "the $fam fallback is a base-14 font" "yes" "yes" ;;
+		*)
+			check "the $fam fallback is a base-14 font" "yes" "no" ;;
+	esac
 done
 
 # Licensing: only fonts that may be redistributed. AndaleMono (Monotype) and
-# Frutiger (Linotype) both shipped in the 2015/2024 originals and must not be
-# in the image; Figtree and Noto are SIL OFL.
-check "no commercially-licensed fonts" "0" \
-      "$(ls "$ENGINE/xsl/fonts" 2>/dev/null | grep -ciE 'andale|frutiger')"
+# Frutiger (Linotype) both shipped in the 2015/2024 originals and must not
+# come back with any theme the project ships.
+check "no commercially-licensed fonts are shipped" "0" \
+      "$(ls "$REPO/themes"/*/fonts 2>/dev/null | grep -ciE 'andale|frutiger')"
 
 
 echo "============ BRANDING ============"

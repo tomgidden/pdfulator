@@ -5,7 +5,7 @@
 #   docker build -f engines/vivlio-docker/Dockerfile -t tomgidden/pdfulator:vivlio .
 #
 # because the image needs three things that live above it -- the vivlio
-# engine's main.js and lockfile, and the shared defaults/ and theme/. A
+# engine's main.js and lockfile, and the built-in theme/ and themes/. A
 # Dockerfile beside its own context would mean duplicating those into this
 # directory, and a duplicated theme is one that silently drifts.
 #
@@ -43,13 +43,15 @@ WORKDIR /app
 COPY engines/vivlio/package.json engines/vivlio/bun.lock ./
 RUN bun install --frozen-lockfile
 
-# Shared assets, then the engine itself. defaults/ and theme/ sit above the
-# engine in the source tree because every engine renders the same document.
-COPY defaults ./defaults
+# The built-in theme, then the engine itself.
+#
+# There is no defaults/ any more: the stylesheet, template and fonts that lived
+# there are themes now, and the wrapper stages a theme into one directory and
+# mounts it. An image carrying its own copy would be a second opinion about
+# what a document should look like.
 COPY theme    ./theme
+COPY themes   ./themes
 COPY engines/vivlio/main.js ./
-
-ENV PDFULATOR_DEFAULTS=/app/defaults
 
 # Where the wrapper mounts things. Created here, and owned by the runtime user,
 # so that a container writing an output file into /out can do so without the

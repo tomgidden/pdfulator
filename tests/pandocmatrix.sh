@@ -40,13 +40,16 @@ check() {  # check <description> <expected> <actual>
 # which is the one thing here that is not the shipped file.
 fixture() {
 	rm -rf "$BASE"
-	mkdir -p "$BASE/defaults" "$BASE/engine" "$BASE/theme" "$BASE/work" \
+	mkdir -p "$BASE/engine" "$BASE/theme" "$BASE/work" \
 	         "$BASE/bin" "$BASE/in" "$BASE/out"
 
 	printf 'template\n'  > "$BASE/engine/article.tmpl"
 	printf '%s\n' '-- filter' > "$BASE/engine/metadata.lua"
-	printf 'body{}\n'    > "$BASE/engine/print.css"
+	# The theme arrives staged: the wrapper has already concatenated the CSS
+	# cascade and generated the @font-face rules, so the engine sees two plain
+	# files rather than a theme it has to resolve anything about.
 	printf 'body{}\n'    > "$BASE/theme/print.css"
+	printf ':root{}\n'   > "$BASE/theme/fonts.css"
 
 	printf '# A document\n\nBody text.\n' > "$BASE/in/doc.md"
 
@@ -76,8 +79,7 @@ STUB
 	chmod +x "$BASE/bin/pandoc" "$BASE/bin/pagedjs-cli"
 
 	# The shipped script with its container paths pointed at the fixture.
-	sed -e "s|^DEFAULTS=/defaults|DEFAULTS=$BASE/defaults|" \
-	    -e "s|^ENGINE=/engine|ENGINE=$BASE/engine|" \
+	sed -e "s|^ENGINE=/engine|ENGINE=$BASE/engine|" \
 	    -e "s|/work/pdfulator|$BASE/work/pdfulator|" \
 	    "$RENDER" > "$BASE/render"
 	chmod +x "$BASE/render"

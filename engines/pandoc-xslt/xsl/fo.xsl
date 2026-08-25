@@ -25,10 +25,21 @@
       <xsl:param name="variablelist.as.blocks" select="1" />
   -->
 
-  <xsl:param name="serif.font.family">Sabon</xsl:param>
-  <xsl:param name="sans.font.family">Figtree</xsl:param>
-  <xsl:param name="dingbat.font.family">Figtree</xsl:param>
-  <xsl:param name="monospace.font.family">Noto Sans Mono Condensed</xsl:param>
+  <!-- Font families, and the defaults if nobody says otherwise.
+
+       These are xsl:param, so the engine overrides them from the staged
+       theme's fo-params (see engines/pandoc-xslt/render). They have always
+       been parameters; until the theme cascade existed nothing passed them,
+       so changing a font meant replacing this whole stylesheet.
+
+       The defaults are the base-14 PDF fonts, which every reader has built
+       in and which need no file. Naming a font that is not bundled is how
+       `Sabon` sat in serif.font.family for years: harmless only because
+       body.font.family below takes the sans one before it is ever read. -->
+  <xsl:param name="serif.font.family">Times</xsl:param>
+  <xsl:param name="sans.font.family">Helvetica</xsl:param>
+  <xsl:param name="dingbat.font.family">Helvetica</xsl:param>
+  <xsl:param name="monospace.font.family">Courier</xsl:param>
 
   <xsl:param name="body.font.family"><xsl:value-of select="$sans.font.family" /></xsl:param>
   <xsl:param name="body.font.weight">400</xsl:param>
