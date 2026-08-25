@@ -55,6 +55,28 @@ import puppeteer from 'puppeteer-core';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
+// Used only when the theme directory has no article.tmpl, which the wrapper
+// never allows -- see buildHtml.
+const FALLBACK_TMPL = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="/theme/fonts.css">
+  <link rel="stylesheet" href="/theme/print.css">
+</head>
+<body class="{{pdfulator_features}}">
+  <article>
+    <hgroup>
+      <h1>{{{title}}}</h1>
+      {{#subtitle}}<p>{{{subtitle}}}</p>{{/subtitle}}
+    </hgroup>
+    {{{body}}}
+  </article>
+</body>
+</html>
+`;
+
 // Markdown → HTML
 
 const md = new MarkdownIt({ html: true, linkify: true, typographer: false })
@@ -162,17 +184,19 @@ function buildHtml(mdSource, inputBase, themeDir, extraCss) {
 
   const renderedBody = md.render(body);
 
-  // The template comes from the staged directory, which always has one: the
-  // floor theme supplies it and everything else inherits it through the
-  // cascade. No fallback here -- resolving the template is the wrapper's job,
-  // and a second opinion about it is how the two used to disagree.
+  // The template normally comes from the staged directory: themes/default
+  // supplies one and every other theme inherits it through the cascade.
+  //
+  // FALLBACK_TMPL is for the engine run on its own, against a theme directory
+  // nobody staged -- which its own test does, and which is the whole point of
+  // the engine contract being three paths and nothing else. It is deliberately
+  // the minimum that produces a readable page, not a copy of the real
+  // template: an engine carrying a second opinion about how a document should
+  // look is how defaults/ and the pandoc engine drifted apart.
   const tmplPath = path.join(themeDir, 'article.tmpl');
-  if (!fs.existsSync(tmplPath)) {
-    console.error(`vivlio: the staged theme has no article.tmpl: ${tmplPath}`);
-    process.exit(1);
-  }
-
-  const tmpl = fs.readFileSync(tmplPath, 'utf8');
+  const tmpl = fs.existsSync(tmplPath)
+    ? fs.readFileSync(tmplPath, 'utf8')
+    : FALLBACK_TMPL;
 
   // Render inline markdown in title/subtitle (e.g. _pdfulator_ → <em>pdfulator</em>)
   const mdInline = s => s ? md.renderInline(String(s)) : '';
