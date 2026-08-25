@@ -46,6 +46,65 @@ watcher_stop_all() {
 }
 trap 'watcher_stop_all; rm -rf "$BASE"' EXIT INT TERM
 
+# --- Stand-in watchers -------------------------------------------------------
+#
+# Installed here, before the first case, rather than beside the EVENT WATCHERS
+# section that is mostly about them.
+#
+# They have to be on PATH before *any* section that forces a mechanism with
+# $PDFULATOR_WATCH, and NON-REPRODUCIBLE OUTPUT does exactly that several
+# hundred lines earlier. With the stubs installed later, that section selected
+# fswatch and then found whatever fswatch the machine happened to have -- so
+# it passed on a laptop with brew's fswatch installed and reported zero
+# conversions on one without, which is a test that measures the machine rather
+# than the code. It was installed on the machine these cases were written on,
+# and gone from it a fortnight later.
+#
+# The stubs live *beside* $BASE rather than inside it: fixture() does
+# `rm -rf "$BASE"`, so a $BASE/stubs is deleted before the first case that
+# needs it. That failure is quiet and misleading -- PATH then names a missing
+# directory, the real tool is absent too, and every positive case reports "no
+# reaction" while every negative case passes for having run nothing at all.
+STUBS=$BASE.stubs
+mkdir -p "$STUBS"
+
+# Both stubs poll internally and print a line per change, which is what the
+# real tools do from the kernel. The point is not how they detect a change but
+# that watch_dir reacts correctly to the events, including events it should
+# ignore.
+cat > "$STUBS/fswatch" <<'STUB'
+#!/bin/sh
+# Stand-in for `fswatch -o <dir>`: a count per batch of changes.
+dir=""
+for a in "$@"; do case $a in -*) ;; *) dir=$a ;; esac; done
+prev=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+while :; do
+	sleep 0.1
+	now=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+	if [ "$now" != "$prev" ]; then printf '1\n'; prev=$now; fi
+done
+STUB
+
+cat > "$STUBS/inotifywait" <<'STUB'
+#!/bin/sh
+# Stand-in for `inotifywait -q -m -e ... <dir>`: "<dir> <EVENT> <file>".
+dir=""
+for a in "$@"; do case $a in -*) ;; *) dir=$a ;; esac; done
+prev=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+while :; do
+	sleep 0.1
+	now=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
+	if [ "$now" != "$prev" ]; then printf '%s/ CLOSE_WRITE,CLOSE x\n' "$dir"; prev=$now; fi
+done
+STUB
+
+chmod +x "$STUBS/fswatch" "$STUBS/inotifywait"
+PATH=$STUBS:$PATH
+export PATH
+
+# Re-set now that $STUBS exists, so the stubs are cleaned up too.
+trap 'watcher_stop_all; rm -rf "$BASE" "$STUBS"' EXIT INT TERM
+
 # Poll fast, so the tests take a second rather than ten.
 PDFULATOR_POLL_INTERVAL=0.2
 
@@ -300,48 +359,9 @@ echo "============ EVENT WATCHERS ============"
 # platform. What it cannot test is whether the real tools notice a given
 # filesystem change; that is their job and they have their own test suites.
 #
-# The stubs live *beside* $BASE rather than inside it: fixture() does
-# `rm -rf "$BASE"`, so a $BASE/stubs is deleted before the first case that
-# needs it. That failure is quiet and misleading -- PATH then names a missing
-# directory, the real tool is absent too, and every positive case reports "no
-# reaction" while every negative case passes for having run nothing at all.
-STUBS=$BASE.stubs
-mkdir -p "$STUBS"
-trap 'watcher_stop_all; rm -rf "$BASE" "$STUBS"' EXIT INT TERM
-
-# Both stubs poll internally and print a line per change, which is what the
-# real tools do from the kernel. The point is not how they detect a change but
-# that watch_dir reacts correctly to the events, including events it should
-# ignore.
-cat > "$STUBS/fswatch" <<'STUB'
-#!/bin/sh
-# Stand-in for `fswatch -o <dir>`: a count per batch of changes.
-dir=""
-for a in "$@"; do case $a in -*) ;; *) dir=$a ;; esac; done
-prev=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
-while :; do
-	sleep 0.1
-	now=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
-	if [ "$now" != "$prev" ]; then printf '1\n'; prev=$now; fi
-done
-STUB
-
-cat > "$STUBS/inotifywait" <<'STUB'
-#!/bin/sh
-# Stand-in for `inotifywait -q -m -e ... <dir>`: "<dir> <EVENT> <file>".
-dir=""
-for a in "$@"; do case $a in -*) ;; *) dir=$a ;; esac; done
-prev=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
-while :; do
-	sleep 0.1
-	now=$(ls -a "$dir" 2>/dev/null; cat "$dir"/* 2>/dev/null)
-	if [ "$now" != "$prev" ]; then printf '%s/ CLOSE_WRITE,CLOSE x\n' "$dir"; prev=$now; fi
-done
-STUB
-
-chmod +x "$STUBS/fswatch" "$STUBS/inotifywait"
-PATH=$STUBS:$PATH
-export PATH
+# The stubs themselves are installed at the top of this file rather than here:
+# see the note there for why they cannot wait until this section.
+#
 
 # PDFULATOR_WATCH forces the branch. Without it the stubs would be found by
 # watch_mechanism anyway, but only in the preference order -- inotifywait would
