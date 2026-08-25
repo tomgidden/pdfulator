@@ -215,6 +215,15 @@ ok "and names what it expected" "yes" \
 
 section "CHECKSUMS"
 
+# These cases fetch over file://, which needs curl or wget -- a stock debian:12
+# has neither. Skipped rather than failed there: the download path reports the
+# missing tool perfectly clearly ("need curl or wget to download fonts"), and a
+# red suite on a machine that cannot download anything says nothing about the
+# code under test.
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+	echo "SKIP: no curl or wget; download and checksum cases need one."
+else
+
 # A download is verified before it is cached, so a bad one is never kept and
 # never mistaken for good on the next run.
 setup
@@ -259,6 +268,8 @@ PDFULATOR_FONT_FALLBACK=1
 err=$(fonts_acquire "$BASE/mt" body 400 normal "$BASE/stage/fonts" 2>&1); st=$?
 ok "--font-fallback does NOT excuse a bad checksum" "1" "$st"
 unset PDFULATOR_FONT_FALLBACK
+
+fi  # curl/wget
 
 
 section "GENERATING CSS"

@@ -60,7 +60,7 @@ docker-watch:
 # Build & publish the engine's image
 #
 # Built from the repository root with -f, because the image needs the vivlio
-# engine's main.js and lockfile plus the shared defaults/ and theme/, all of
+# engine's main.js and lockfile plus theme/ and themes/, all of
 # which live above the engine directory.
 
 build:
@@ -90,7 +90,7 @@ release:
 # on arrival.
 
 DIST      = pdfulator.tar.gz
-DIST_TOP  = defaults theme lib engines
+DIST_TOP  = theme themes lib engines
 # Expanded for dependency tracking only; the copy uses DIST_TOP so that
 # directories arrive as directories rather than a flattened heap of files.
 #
@@ -99,7 +99,7 @@ DIST_TOP  = defaults theme lib engines
 # engine's own bun.lock, which does ship. (Step 5 of the modular plan splits
 # these into per-engine tarballs so a user downloads only the engines they use;
 # until then they ride along in the one tarball.)
-DIST_SRC  = $(shell find defaults theme lib -type f) \
+DIST_SRC  = $(shell find theme themes lib -type f) \
             $(shell find engines -type f -not -path '*/node_modules/*')
 
 # What `pdfulator --version` reports and `--update` compares against. CI
