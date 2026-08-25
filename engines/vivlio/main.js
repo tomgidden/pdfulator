@@ -46,14 +46,14 @@ import puppeteer from 'puppeteer-core';
 
 // Paths
 //
-// $PDFULATOR_DEFAULTS lets the wrapper point at shared assets that live above
-// the engine directory, since defaults/ is not the engine's to own -- every
-// engine renders the same document. It falls back to a sibling directory so
-// that running main.js straight from a checkout works.
+// There is no defaults directory any more. What used to live there -- a
+// stylesheet, a template and three font families -- was engine-specific
+// content in a shared place, and the copy the pandoc engine kept beside it had
+// already drifted 640 lines away. Both are now themes, and the wrapper hands
+// this engine a staged directory holding everything a conversion needs:
+// print.css, fonts.css, the fonts themselves, and the template.
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULTS_DIR = process.env.PDFULATOR_DEFAULTS
-  || path.join(SCRIPT_DIR, '..', '..', 'defaults');
 
 // Markdown → HTML
 
@@ -162,10 +162,15 @@ function buildHtml(mdSource, inputBase, themeDir, extraCss) {
 
   const renderedBody = md.render(body);
 
-  // Load template: theme overrides default
-  const tmplPath = fs.existsSync(path.join(themeDir, 'article.tmpl'))
-    ? path.join(themeDir, 'article.tmpl')
-    : path.join(DEFAULTS_DIR, 'article.tmpl');
+  // The template comes from the staged directory, which always has one: the
+  // floor theme supplies it and everything else inherits it through the
+  // cascade. No fallback here -- resolving the template is the wrapper's job,
+  // and a second opinion about it is how the two used to disagree.
+  const tmplPath = path.join(themeDir, 'article.tmpl');
+  if (!fs.existsSync(tmplPath)) {
+    console.error(`vivlio: the staged theme has no article.tmpl: ${tmplPath}`);
+    process.exit(1);
+  }
 
   const tmpl = fs.readFileSync(tmplPath, 'utf8');
 
@@ -243,8 +248,6 @@ async function htmlToPdf(htmlPath, pdfPath, chromiumPath, themeDir, verbose) {
       filePath = path.join(VIEWER_DIR, url.slice('/vivliostyle/'.length));
     } else if (url.startsWith('/doc/')) {
       filePath = path.join(serveRoot, url.slice('/doc/'.length));
-    } else if (url.startsWith('/defaults/')) {
-      filePath = path.join(DEFAULTS_DIR, url.slice('/defaults/'.length));
     } else if (url.startsWith('/theme/')) {
       filePath = path.join(themeDir, url.slice('/theme/'.length));
     } else {

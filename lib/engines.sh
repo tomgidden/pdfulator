@@ -299,7 +299,6 @@ engine_prepare() {  # engine_prepare <id> [force]
 	if [ -x "$_epr_script" ]; then
 		printf 'Preparing the %s engine...\n' "$_epr_id" >&2
 		PDFULATOR_HOME="$PDFULATOR_HOME" \
-		PDFULATOR_DEFAULTS="${PDFULATOR_DEFAULTS:-$PDFULATOR_DIR/defaults}" \
 			"$_epr_script" || {
 				# Fatal, not a warning. The engine has said it is not ready,
 				# and running `convert` anyway trades one clear message for a
@@ -328,7 +327,9 @@ engine_convert() {  # engine_convert <id> <input|-> <output|-> <theme-dir>
 	_ec_id=$1
 	shift
 
+	# No PDFULATOR_DEFAULTS any more: there is no defaults directory to point
+	# at. Everything an engine used to find there now arrives in the staged
+	# theme it is handed as its third argument.
 	PDFULATOR_HOME="$PDFULATOR_HOME" \
-	PDFULATOR_DEFAULTS="${PDFULATOR_DEFAULTS:-$PDFULATOR_DIR/defaults}" \
 		"$ENGINES_DIR/$_ec_id/convert" "$@"
 }

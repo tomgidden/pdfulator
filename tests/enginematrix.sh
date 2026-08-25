@@ -358,9 +358,13 @@ check "the right engine ran" "vivlio" "$(cut -d'|' -f1 < "$BASE/ran")"
 check "input, output and theme are passed" "/in.md|/out.pdf|/theme" \
       "$(cut -d'|' -f2,3,4 < "$BASE/ran")"
 # The environment is the rest of the contract: an engine is told which browser
-# to use and where the shared assets are, rather than going to look.
+# to use rather than going to look.
 check "CHROME_PATH is passed through" "/fake/chrome" "$(cut -d'|' -f5 < "$BASE/ran")"
-check "defaults are pointed at" "$BASE/dist/defaults" "$(cut -d'|' -f6 < "$BASE/ran")"
+# PDFULATOR_DEFAULTS is deliberately *not* set: there is no defaults directory
+# any more, and everything an engine used to find there arrives in the staged
+# theme it is handed as its third argument.
+check "no defaults directory is pointed at" "no-defaults" \
+      "$(cut -d'|' -f6 < "$BASE/ran")"
 
 echo
 [ "$FAIL" -eq 0 ] && echo "ALL EXPECTATIONS MET" || echo "SOME EXPECTATIONS MISSED"

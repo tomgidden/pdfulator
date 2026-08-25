@@ -36,7 +36,10 @@ if [ -f "$theme/global.tmpl" ]; then TEMPLATE=$theme/global.tmpl; fi
 STYLESHEET=$ENGINE/xsl/fo.xsl
 if [ -f "$theme/fo.xsl" ]; then STYLESHEET=$theme/fo.xsl; fi
 
+# The staged theme's generated font configuration is preferred over the
+# engine's, and a theme's own hand-written fop.xconf over both.
 FOPCONF=$ENGINE/xsl/fop.xconf
+if [ -f "$theme/fop-fonts.xconf" ]; then FOPCONF=$theme/fop-fonts.xconf; fi
 if [ -f "$theme/fop.xconf" ]; then FOPCONF=$theme/fop.xconf; fi
 # Absolute, because FOP is run from the scratch directory (see stage 3) and a
 # relative config path would then resolve against the wrong place. A mounted
@@ -117,7 +120,36 @@ perl -pi -e 's/(<programlisting[^\n]+)\n/$1/g;' "$WORK/$leaf.xml"
 # (or a long hang with no network). Failing loudly is better.
 #
 # --path is how the stylesheet finds titlepages.xsl and the rest beside it.
+#
+# The font parameters come from the staged theme's fo-params, a role-per-line
+# file the wrapper generated from fonts.conf. fo.xsl has always parameterised
+# its families -- serif.font.family and the rest are xsl:param -- but nothing
+# ever passed them, so a theme could only change a font by replacing the whole
+# stylesheet. This is the missing half of that.
+#
+# Accumulated in the positional parameters, NOT in a string that is then
+# eval'd. A family name is theme-supplied data: one containing a single quote
+# would close the quoting an eval had added and run the rest as commands, which
+# is precisely the hole that reading engine.conf rather than sourcing it exists
+# to avoid. "$@" carries the spaces in "TeX Gyre Pagella" without any quoting
+# for the shell to get wrong.
+set --
+if [ -f "$theme/fo-params" ]; then
+	while IFS="$(printf '\t')" read -r _role _family || [ -n "$_role" ]; do
+		[ -n "$_role" ] || continue
+		[ -n "$_family" ] || continue
+		case $_role in
+			body)    _p=sans.font.family ;;
+			heading) _p=title.font.family ;;
+			mono)    _p=monospace.font.family ;;
+			*)       continue ;;
+		esac
+		set -- "$@" --stringparam "$_p" "$_family"
+	done < "$theme/fo-params"
+fi
+
 xsltproc --xinclude --nonet \
+	"$@" \
 	--path "$(dirname -- "$STYLESHEET")" \
 	-o "$WORK/$leaf.fo" \
 	"$STYLESHEET" \

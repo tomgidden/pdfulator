@@ -1,5 +1,21 @@
-/* @import url(/defaults/'https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap'); */
-/* TeX Gyre Pagella, an open-source Palatino lookalike, is installed by `fonts-texgyre` APT package in the Dockerfile */
+/* ==========================================================================
+   themes/classic — pagedjs
+   ==========================================================================
+
+   The stylesheet the pandoc-pagedjs engine carried as its own print.css,
+   moved here. It is a separate file from stylers/vivliostyle/print.css rather
+   than shared with it because the two renderers present different DOMs and
+   different page models -- this one styles the elements pandoc's template
+   emits, and uses Paged.js's margin boxes.
+
+   That the two sheets started as one and drifted 640 lines apart is exactly
+   why they now sit side by side under stylers/: the difference is visible,
+   and neither is pretending to be the other's default.
+
+   As with the vivliostyle sheet, the @font-face block is gone -- fonts.css
+   generates it -- and font families are named by role.
+   ========================================================================== */
+
 
 html {
   --S: 15pt;
@@ -23,67 +39,27 @@ html {
 }
 
 body {
-  font-family: "TeX Gyre Pagella";
+  font-family: var(--pdfulator-body);
   font-optical-sizing: auto;
   font-weight: 400;
 }
 
 h1,h2,h3,h4,h5,h6 {
-  font-family: "Open Sans Variable", sans-serif;
+  font-family: var(--pdfulator-heading);
   font-optical-sizing: auto;
   font-weight: 600;
   font-style: normal;
 }
 
 article>hgroup>h1 {
-  font-family: "Open Sans Variable", sans-serif;
+  font-family: var(--pdfulator-heading);
   font-optical-sizing: auto;
   font-weight: 700;
 }
 
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  src: url(/defaults/texgyrepagella-regular.otf) format('opentype');
-}
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  font-style: italic;
-  src: url(/defaults/texgyrepagella-italic.otf) format('opentype');
-}
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  font-weight: 600;
-  src: url(/defaults/texgyrepagella-bold.otf) format('opentype');
-}
-@font-face {
-  font-family: 'TeX Gyre Pagella';
-  font-display: swap;
-  font-style: italic;
-  font-weight: 600;
-  src: url(/defaults/texgyrepagella-bolditalic.otf) format('opentype');
-}
-@font-face {
-  font-family: 'Noto Sans Mono Variable';
-  font-display: swap;
-  src: url(/defaults/NotoSansMono-VariableFont_wdth,wght.ttf) format('truetype');
-}
-@font-face {
-  font-family: 'Open Sans Variable';
-  font-display: swap;
-  src: url(/defaults/OpenSans-VariableFont_wdth,wght.ttf) format('truetype');
-}
-@font-face {
-  font-family: 'Open Sans Variable';
-  font-style: italic;
-  font-display: swap;
-  src: url(/defaults/OpenSans-Italic-VariableFont_wdth,wght.ttf) format('truetype');
-}
 
 pre, code {
-  font-family: "Noto Sans Mono Variable";
+  font-family: var(--pdfulator-mono);
   /* font-variation-settings: "wdth" 100; */
   /* font-weight: 400; */
   font-size: 0.85em;
@@ -96,7 +72,7 @@ pre, code {
   
 .narrow_monospace pre,
 .narrow_monospace code {
-  font-family: "Noto Sans Mono Variable";
+  font-family: var(--pdfulator-mono);
   font-variation-settings: "wdth" 62.5;
 }
 
@@ -182,14 +158,14 @@ body {
   }
 
   @bottom-left {
-    font-family: "Open Sans Variable";
+    font-family: var(--pdfulator-heading);
     font-weight: 600;
     font-size: var(--S0-85);
     content: element(pageFooter);
   }
 
   @bottom-right {
-    font-family: "Open Sans Variable";
+    font-family: var(--pdfulator-heading);
     font-weight: 600;
     font-size: var(--S0-85);
     content: counter(page);

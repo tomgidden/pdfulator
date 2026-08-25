@@ -1,0 +1,112 @@
+/* themes/default — resets, and the three font roles wired up.
+ *
+ * No layout, no page furniture, no colours beyond black on white. A theme
+ * built on this one gets a sane starting point rather than a look it has to
+ * undo first.
+ *
+ * Fonts are referred to only through the custom properties that fonts.css
+ * generates -- var(--pdfulator-body) and its two siblings -- never by name.
+ * That indirection is the whole point of declaring fonts by role: swapping
+ * Times for Palatino is a fonts.conf change, and no stylesheet in the chain
+ * needs editing. The properties are always defined, for every known role,
+ * whether or not this theme declared a font for it.
+ */
+
+html {
+  font-size: 11pt;
+}
+
+body {
+  font-family: var(--pdfulator-body);
+  line-height: 1.45;
+  color: #000;
+  background: #fff;
+  margin: 0;
+  /* Left-aligned rather than justified: justification without hyphenation
+   * gives rivers, and hyphenation dictionaries are a per-language asset this
+   * theme deliberately does not carry. */
+  text-align: left;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--pdfulator-heading);
+  line-height: 1.2;
+  /* Headings keep their block with the text that follows; a heading alone at
+   * the foot of a page is the most common paginated-output complaint. */
+  break-after: avoid-page;
+  page-break-after: avoid;
+}
+
+h1 { font-size: 2em;    margin: 0 0 0.6em; }
+h2 { font-size: 1.5em;  margin: 1.4em 0 0.5em; }
+h3 { font-size: 1.25em; margin: 1.3em 0 0.4em; }
+h4 { font-size: 1.1em;  margin: 1.2em 0 0.4em; }
+h5, h6 { font-size: 1em; margin: 1.2em 0 0.4em; }
+
+p {
+  margin: 0 0 0.7em;
+  /* Two lines is the usual minimum for a widow or an orphan. */
+  orphans: 2;
+  widows: 2;
+}
+
+code, pre, kbd, samp {
+  font-family: var(--pdfulator-mono);
+  font-size: 0.9em;
+}
+
+pre {
+  /* A code block that runs off the page is worse than one that wraps: the
+   * text is simply gone, and nothing on the page says so. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  margin: 0 0 0.8em;
+}
+
+blockquote {
+  margin: 0 0 0.8em 1.5em;
+}
+
+ul, ol {
+  margin: 0 0 0.8em;
+  padding-left: 1.5em;
+}
+
+li {
+  margin-bottom: 0.2em;
+}
+
+table {
+  border-collapse: collapse;
+  margin: 0 0 0.8em;
+}
+
+th, td {
+  border: 1px solid #999;
+  padding: 0.3em 0.5em;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-family: var(--pdfulator-heading);
+  font-weight: bold;
+}
+
+img {
+  /* An image wider than the text column silently overflows the page in a
+   * paginating renderer rather than scrolling, as it would on screen. */
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #999;
+  margin: 1.2em 0;
+}
