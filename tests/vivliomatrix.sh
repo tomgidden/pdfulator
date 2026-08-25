@@ -18,7 +18,10 @@
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LIB="$ROOT/lib"
 ENGINE="$ROOT/engines/vivlio/convert"
-THEME="$ROOT/theme"
+# The engine is exercised directly here, against a theme nobody staged -- which
+# is the contract it has to honour: three paths, and no assumption that a
+# wrapper prepared any of them.
+THEME="$ROOT/themes/default"
 
 . "$LIB/paths.sh"
 . "$LIB/browser.sh"

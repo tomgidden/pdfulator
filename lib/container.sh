@@ -214,24 +214,22 @@ container_run() {  # container_run <engine-dir> <in> <out> <theme>
 
 	# --- Theme ---------------------------------------------------------------
 	#
-	# The built-in theme is already in the image, so mounting it would replace
-	# a copy with an identical copy -- and would fail outright for a user whose
-	# install directory the daemon cannot reach (a remote or rootless daemon,
-	# or a home the VM does not share). Only a theme from outside is mounted.
+	# What arrives here is a *staged* theme: the wrapper has already walked the
+	# inheritance chain, concatenated the CSS, fetched the fonts and generated
+	# whatever configuration this engine reads. So it is always mounted.
 	#
-	# Compared by resolved path, since $PDFULATOR_DIR/theme and ./theme are the
-	# same directory reached two ways.
+	# There used to be a special case that skipped the mount when the theme was
+	# the shipped $PDFULATOR_DIR/theme, on the grounds that the image already
+	# had an identical copy. That cannot be true of a staged directory -- it
+	# lives under $PDFULATOR_HOME/cache and is built per engine -- and skipping
+	# the mount would hand the container the theme baked in at build time,
+	# silently ignoring the user's. The image's own copy is now only the
+	# fallback for a run that supplies no theme at all.
 	_cr_theme_arg=$_cr_builtin
 	if [ -n "$_cr_theme" ] && [ -d "$_cr_theme" ]; then
 		_cr_theme_abs=$(cd -- "$_cr_theme" && pwd)
-		_cr_shipped=""
-		if [ -d "${PDFULATOR_DIR:-}/theme" ]; then
-			_cr_shipped=$(cd -- "$PDFULATOR_DIR/theme" && pwd)
-		fi
-		if [ "$_cr_theme_abs" != "$_cr_shipped" ]; then
-			set -- "$@" -v "$_cr_theme_abs:/theme:ro"
-			_cr_theme_arg=/theme
-		fi
+		set -- "$@" -v "$_cr_theme_abs:/theme:ro"
+		_cr_theme_arg=/theme
 	fi
 
 	# --- Ownership -----------------------------------------------------------

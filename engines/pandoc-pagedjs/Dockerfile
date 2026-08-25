@@ -66,7 +66,9 @@ COPY engines/pandoc-pagedjs/article.tmpl \
 
 # The built-in theme, so the image works with no mounts at all. A user theme
 # is mounted over /theme by the engine's convert.
-COPY theme /theme
+# The fallback theme, for a run that supplies none. Normally the wrapper
+# stages one and mounts it over this.
+COPY themes/default /theme
 
 # Where the wrapper mounts things, plus the scratch directory the conversion
 # works in.
