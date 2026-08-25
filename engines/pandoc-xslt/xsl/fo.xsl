@@ -500,7 +500,16 @@
 
   <xsl:param name="header.rule" select="0"></xsl:param>
 
-  <xsl:param name="header.image.filename">images/pdfulator-logotype.svg</xsl:param>
+  <!-- The logo. Both parameters come from the staged theme's logo-params, set
+       by engines/pandoc-xslt/render, so a theme declares a logo once in
+       theme.conf and it works here as it does in the CSS engines.
+
+       Empty by default: a theme with no logo must produce no graphic, not a
+       missing-file error, and certainly not somebody else's logotype. The
+       engine's own images/ is still there for a theme that asks for it by
+       name. -->
+  <xsl:param name="header.image.filename"></xsl:param>
+  <xsl:param name="header.image.position">top-right</xsl:param>
 
   <xsl:template name="header.content">
     <xsl:param name="pageclass" select="''" />
@@ -508,17 +517,19 @@
     <xsl:param
       name="position" select="''" />
     <xsl:param name="gentext-key" select="''" />
-    <xsl:choose>
-      <xsl:when test="$position = 'right'">
-        <fo:external-graphic content-height="1.25em" baseline-shift="0.25em">
-          <xsl:attribute name="src">
-            <xsl:call-template name="fo-external-image">
-              <xsl:with-param name="filename" select="$header.image.filename" />
-            </xsl:call-template>
-          </xsl:attribute>
-        </fo:external-graphic>
-      </xsl:when>
-    </xsl:choose>
+    <!-- `left`/`right` here is the header cell being filled; the theme's
+         position names a corner, so only its second half is compared. -->
+    <xsl:if test="$header.image.filename != '' and
+                  contains($header.image.position, $position) and
+                  starts-with($header.image.position, 'top')">
+      <fo:external-graphic content-height="1.25em" baseline-shift="0.25em">
+        <xsl:attribute name="src">
+          <xsl:call-template name="fo-external-image">
+            <xsl:with-param name="filename" select="$header.image.filename" />
+          </xsl:call-template>
+        </xsl:attribute>
+      </fo:external-graphic>
+    </xsl:if>
   </xsl:template>
 
 

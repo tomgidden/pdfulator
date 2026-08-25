@@ -249,3 +249,84 @@ theme_file() {  # theme_file <chain> <engine> <styler> <name>
 theme_file_one() {  # theme_file_one <chain> <engine> <styler> <name>
 	theme_file "$@" | head -1
 }
+
+
+# --- The logo ------------------------------------------------------------------
+#
+# A logo is the one asset almost every theme wants and almost nobody wants to
+# write CSS for. Declaring it in theme.conf means a theme can be a logo and
+# nothing else:
+#
+#   # themes/mine/theme.conf
+#   extends  = classic
+#   logo.file     = logo.svg
+#   logo.position = top right
+#
+# and the stylesheet it inherits does the placing. Declared rather than
+# hardcoded for the same reason fonts are: `pandoc-xslt` cannot read CSS at
+# all, but it has an fo:external-graphic and a header template keyed on
+# position, so one declaration can drive both.
+
+
+# Which logo file a theme has, as a bare filename, or empty.
+#
+#   theme_logo_file <staged-dir> [declared]
+#
+# A theme may name one in theme.conf; otherwise the conventional spellings are
+# tried in turn, so dropping a logo.svg into a theme directory is enough. SVG
+# first: it is the only one that stays sharp at whatever size the page gives
+# it, and a logo is exactly the artwork that should be vector.
+theme_logo_file() {  # theme_logo_file <staged-dir> [declared]
+	if [ -n "${2:-}" ]; then
+		# A named file that is not there is a mistake worth reporting, not a
+		# silent fall through to a different logo. Same reasoning as a missing
+		# font: quietly using something else is how the wrong thing ships.
+		if [ -f "$1/$2" ]; then
+			printf '%s\n' "$2"
+			return 0
+		fi
+		theme_error "the theme names a logo it does not have: $2"
+		return 1
+	fi
+
+	for _tl_c in logo.svg logo.png logo.jpg logo.jpeg logo.webp; do
+		if [ -f "$1/$_tl_c" ]; then
+			printf '%s\n' "$_tl_c"
+			return 0
+		fi
+	done
+
+	printf '\n'
+	return 0
+}
+
+
+# Where the logo goes, normalised to a CSS margin-box name.
+#
+# Accepts what a person would write -- `top right`, `top-right`, `bottom left`
+# -- and yields `top-right`, which is both the CSS at-rule name and something
+# the XSL can switch on. An unrecognised value is an error rather than a
+# silent default, since a typo would otherwise put the logo somewhere the
+# theme's author did not intend and did not ask about.
+#
+# Deliberately only a corner, for now. The obvious next wants -- a logo on the
+# first page only, or mirrored for recto and verso -- are not logo questions:
+# they are the same question for running headers, footers, margins and page
+# numbering, and answering it here alone would leave a `logo.recto` that
+# nothing else in the system honours. When that placement model arrives this
+# key should grow into it rather than be worked around.
+theme_logo_position() {  # theme_logo_position [declared]
+	_tp=$(printf '%s' "${1:-top right}" | tr 'A-Z_' 'a-z-' | tr -s ' ' '-')
+	case $_tp in
+		top-left|top-center|top-centre|top-right|\
+		bottom-left|bottom-center|bottom-centre|bottom-right)
+			# CSS spells it `center`; accept the other spelling and normalise.
+			printf '%s\n' "$(printf '%s' "$_tp" | sed 's/centre/center/')"
+			return 0
+			;;
+		*)
+			theme_error "unknown logo position: ${1:-} (try \"top right\")"
+			return 1
+			;;
+	esac
+}

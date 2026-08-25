@@ -148,6 +148,26 @@ if [ -f "$theme/fo-params" ]; then
 	done < "$theme/fo-params"
 fi
 
+# The logo, the same way. fo.xsl already has a header.image.filename param and
+# a header template that switches on position, so a theme's declared logo needs
+# no XSL of its own -- which is the point of declaring it rather than making
+# every theme ship a stylesheet.
+if [ -f "$theme/logo-params" ]; then
+	while IFS="$(printf '\t')" read -r _key _val || [ -n "$_key" ]; do
+		[ -n "$_key" ] && [ -n "$_val" ] || continue
+		case $_key in
+			file)
+				# Absolute, because FOP resolves a relative path against
+				# <base> rather than against the theme.
+				set -- "$@" --stringparam header.image.filename "$theme/$_val"
+				;;
+			position)
+				set -- "$@" --stringparam header.image.position "$_val"
+				;;
+		esac
+	done < "$theme/logo-params"
+fi
+
 xsltproc --xinclude --nonet \
 	"$@" \
 	--path "$(dirname -- "$STYLESHEET")" \
