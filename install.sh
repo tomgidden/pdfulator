@@ -185,7 +185,11 @@ if [ -d "$PDFULATOR_HOME" ]; then
 	# browser choice would look like the update broke something.
 	#
 	# VERSION is deliberately absent -- the incoming one is the whole point.
-	keeps="bun chromium .browser .runtime"
+	# `fonts` joins them: downloaded font files are expensive to refetch and
+	# have nothing to do with which version is installed. `cache` deliberately
+	# does not -- staged themes are derived from the themes and engines being
+	# replaced, so carrying them across an update is carrying stale output.
+	keeps="bun chromium .browser .runtime fonts"
 
 	for keep in $keeps; do
 		[ -e "$PDFULATOR_HOME/$keep" ] && mv "$PDFULATOR_HOME/$keep" "$staging/" 2>/dev/null || true

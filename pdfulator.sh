@@ -20,6 +20,8 @@
 #   --browser auto|find|install|<path>   choose a browser (remembered)
 #   --install-runtime                    download bun if none is installed
 #   --prepare                            fetch what the chosen engine needs
+#   --css <file>                         extra stylesheet, after the theme
+#   --font-fallback                      standard PDF fonts if one can't be had
 #   --setup-status                       report what is still needed
 #   --update [--check|--yes|--force]     fetch and install a newer release
 #   --version                            report the installed version
@@ -43,15 +45,16 @@ if [ -z "${PDFULATOR_DIR:-}" ]; then
 	fi
 fi
 
-# The common layer. Order matters: paths.sh is the foundation, and jobs.sh and
-# theme.sh both build on it.
+# The common layer. Order matters: conf.sh and paths.sh are the foundation,
+# and jobs.sh, theme.sh and fonts.sh build on them; stage.sh builds on fonts.sh
+# and theme.sh in turn.
 #
 # Sourced rather than duplicated, and sourced *here* rather than per-engine,
 # because this is the layer every engine shares -- job planning, theme
 # resolution, browser discovery and watching are the wrapper's, and an engine
 # only converts. See lib/jobs.sh for why: these were implemented three times
 # over, in three languages, and the three disagreed.
-for _lib in paths jobs theme browser watch engines; do
+for _lib in conf paths jobs theme fonts stage browser watch engines; do
 	if [ -r "$PDFULATOR_DIR/lib/$_lib.sh" ]; then
 		. "$PDFULATOR_DIR/lib/$_lib.sh"
 	else
@@ -377,6 +380,8 @@ browser=""         # --browser value, if given
 engine=""          # --engine value, if given
 list_engines=0     # --list-engines seen
 theme=""           # --theme value, if given
+css=""             # --css value, if given
+font_fallback=0    # --font-fallback seen
 watch=0            # --watch seen
 verbose=0          # --verbose seen
 debug=0            # --debug seen
@@ -392,6 +397,7 @@ for arg in "$@"; do
 	if [ -n "$expect" ]; then
 		case $expect in
 			browser)     browser=$arg ;;
+			css)         css=$arg ;;
 			engine)      engine=$arg ;;
 			theme)       theme=$arg ;;
 			passthrough) args="$args $(quote "$arg")" ;;
@@ -435,6 +441,18 @@ for arg in "$@"; do
 		-t|--theme)         expect=theme ;;
 		--theme=*)          theme=${arg#--theme=} ;;
 
+		# Extra CSS, applied after the whole theme cascade so it wins without
+		# the user having to make a theme to change one rule.
+		--css)              expect=css ;;
+		--css=*)            css=${arg#--css=} ;;
+
+		# A font that cannot be had is normally fatal, because a document
+		# silently rendered in a substitute typeface is the failure this whole
+		# mechanism exists to prevent. This is the way to say "render it
+		# anyway" -- for an offline machine, or a CI job that only cares that
+		# a PDF came out.
+		--font-fallback)    font_fallback=1 ;;
+
 		# Flags the wrapper acts on rather than forwards. Watching and
 		# verbosity belong to the layer that plans jobs, not to the one that
 		# converts a single document.
@@ -451,6 +469,7 @@ if [ -n "$expect" ]; then
 		browser)     echo "pdfulator: --browser needs auto, find, install, or a path" >&2 ;;
 		engine)      echo "pdfulator: --engine needs an engine id (see --list-engines)" >&2 ;;
 		theme)       echo "pdfulator: --theme needs a name or path" >&2 ;;
+		css)         echo "pdfulator: --css needs a file" >&2 ;;
 		passthrough) echo "pdfulator: that flag needs a value" >&2 ;;
 	esac
 	exit 1
@@ -859,6 +878,10 @@ if [ "$command" = "uninstall" ]; then
 	# Which engines have been prepared: a record of downloads, not the
 	# downloads themselves, and meaningless once the engines are gone.
 	rm -rf "$PDFULATOR_HOME/.prepared"
+	# Staged themes are derived entirely from themes and engines, so they are
+	# rebuildable; the font store is downloads, like chromium and bun. Neither
+	# is anything the user put there.
+	rm -rf "$PDFULATOR_HOME/cache" "$PDFULATOR_HOME/fonts"
 	rm -f "$STAMP" "$MANIFEST" "$BROWSER_CONF" "$RUNTIME_CONF"
 
 	# Prune directories that are now empty. -depth so children are considered
@@ -1065,6 +1088,8 @@ Usage:
 
 Options:
   -t, --theme <name|path>   theme to use
+      --css <file>          extra stylesheet, applied after the theme
+      --font-fallback       use standard PDF fonts when a font can't be had
   -e, --engine <id>         engine to use (remembered)
       --list-engines        show the installed engines
   -w, --watch               convert, then again whenever a source changes
@@ -1116,8 +1141,39 @@ ENGINE=$(engine_resolve "$engine") || exit 1
 [ -n "$engine" ] && { engine_pin "$engine" || exit 1; }
 engine_warn_deprecated "$ENGINE"
 
-THEME_DIR=$(theme_resolve "$theme") || exit 1
-[ "$verbose" = 1 ] && echo "Theme: $THEME_DIR" >&2
+THEME_SRC=$(theme_resolve "$theme") || exit 1
+if [ "$verbose" = 1 ]; then echo "Theme: $THEME_SRC" >&2; fi
+
+# What the engine actually receives is built here, not handed over as the user
+# named it: the theme's inheritance chain is walked, the CSS concatenated, the
+# fonts acquired, and the engine-specific configuration generated. The engine
+# then reads files out of one directory and needs to know nothing about any of
+# it -- which is what lets one theme serve a bundled engine, a container (mount
+# the directory) and eventually a remote one (send it).
+#
+# Cached under $PDFULATOR_HOME/cache and keyed by content, so a directory job
+# or a watch session stages once and converts many times.
+# `if`, not `[ ... ] && ...`: under set -e a bare test that fails is a failing
+# command, and not passing --font-fallback is the common case. Three bugs in
+# lib/browser.sh were exactly this shape (daf9507).
+if [ "$font_fallback" = 1 ]; then
+	export PDFULATOR_FONT_FALLBACK=1
+fi
+
+STYLER=$(engine_get "$ENGINE" styler)
+
+# Where the fonts will be when the engine runs, which is not where they are
+# now: a container sees the staged directory at its mount point. Only the
+# wrapper knows both, which is why the path is passed in rather than assumed.
+if engine_needs_docker "$ENGINE"; then
+	FONT_BASE=/theme/fonts
+else
+	FONT_BASE=fonts
+fi
+
+THEME_DIR=$(stage_dir "$THEME_SRC" "$ENGINE" "$STYLER" "$FONT_BASE" "$css") \
+	|| exit 1
+if [ "$verbose" = 1 ]; then echo "Staged: $THEME_DIR" >&2; fi
 
 # Only what this engine actually declares. A pandoc-xslt user never meets bun,
 # and never pays for a browser search -- which is the point of putting the
