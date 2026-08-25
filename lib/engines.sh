@@ -5,7 +5,7 @@
 # directory, which is the point of the refactor -- the future pagedjs engine
 # should be a small addition rather than a fork of the tool.
 #
-# Requires lib/paths.sh.
+# Requires lib/conf.sh and lib/paths.sh.
 #
 # engine.conf is flat key=value, chosen so it needs no parser. It is *not*
 # sourced, though it would be valid sh: sourcing a config file makes every
@@ -49,39 +49,11 @@ engines_list() {
 # an empty value are the same thing -- which suits every key here, all of
 # which are optional with a sensible empty meaning.
 #
-# Tolerant of comments, blank lines and surrounding whitespace, because
-# engine.conf is a file people edit. Only the first occurrence counts.
+# The reading itself is conf_get (lib/conf.sh), shared with theme.conf and
+# fonts.conf. This wrapper exists because callers name an engine, not a path:
+# engine_get vivlio styler rather than a directory they had to build first.
 engine_get() {  # engine_get <id> <key>
-	_eg_file="$ENGINES_DIR/$1/engine.conf"
-	[ -f "$_eg_file" ] || return 1
-
-	while IFS= read -r _eg_line || [ -n "$_eg_line" ]; do
-		# Strip a leading blank run, then skip comments and empties.
-		_eg_line=${_eg_line#"${_eg_line%%[! 	]*}"}
-		case $_eg_line in
-			''|'#'*) continue ;;
-		esac
-
-		# Whitespace around the `=` is invisible in an editor, so
-		# `needs_runtime = js` must mean what it looks like it means. The key
-		# is compared with its own trailing blanks removed, and the value with
-		# blanks stripped from both ends.
-		_eg_key=${_eg_line%%=*}
-		# No '=' at all: not a setting. `if`, not `&&`, throughout this file --
-		# a bare `[ ... ] && ...` whose test is false is a failing command, and
-		# under set -e that aborts the caller. See browser_gather.
-		if [ "$_eg_key" = "$_eg_line" ]; then continue; fi
-		_eg_key=${_eg_key%"${_eg_key##*[! 	]}"}
-		[ "$_eg_key" = "$2" ] || continue
-
-		_eg_val=${_eg_line#*=}
-		_eg_val=${_eg_val#"${_eg_val%%[! 	]*}"}
-		printf '%s\n' "${_eg_val%"${_eg_val##*[! 	]}"}"
-		return 0
-	done < "$_eg_file"
-
-	printf '\n'
-	return 0
+	conf_get "$ENGINES_DIR/$1/engine.conf" "$2"
 }
 
 

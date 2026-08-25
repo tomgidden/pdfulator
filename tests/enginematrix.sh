@@ -6,6 +6,7 @@
 # engine, an engine with no runtime -- and so they stay fixed while the real
 # engines change. Selection is what is under test, not any renderer.
 LIB=$(cd "$(dirname "$0")/../lib" && pwd)
+. "$LIB/conf.sh"
 . "$LIB/paths.sh"
 
 BASE=$(printf '%s' "${TMPDIR:-/tmp}" | sed 's|/*$||')/pdfulator-enginematrix
@@ -84,7 +85,7 @@ echo "============ SET -E ============"
 sete() {  # sete <description> <shell-snippet>
 	if out=$(sh -c "set -e
 		PDFULATOR_DIR='$BASE/dist'; PDFULATOR_HOME='$BASE/home'
-		. '$LIB/paths.sh'; . '$LIB/engines.sh'
+		. '$LIB/conf.sh'; . '$LIB/paths.sh'; . '$LIB/engines.sh'
 		ENGINES_DIR='$BASE/dist/engines'; ENGINE_CONF='$BASE/home/.engine'
 		$2" 2>&1); then
 		printf 'ok    %s\n' "$1"

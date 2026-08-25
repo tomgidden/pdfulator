@@ -155,6 +155,8 @@ install-local: $(DIST) $(DIST).sha256
 test-lib:
 	sh tests/planmatrix.sh
 	sh tests/themematrix.sh
+	sh tests/fontmatrix.sh
+	sh tests/stagematrix.sh
 	sh tests/browsermatrix.sh
 	sh tests/watchmatrix.sh
 	sh tests/enginematrix.sh
