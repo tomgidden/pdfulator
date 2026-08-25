@@ -65,9 +65,12 @@ check_message "$out"
 echo
 echo "===== an edited file is kept, and keeps its directory ====="
 fresh
-echo '/* mine */' >> "$PDFULATOR_HOME/theme/print.css"
+# A shipped theme the user has tweaked in place. Editing one of these is the
+# obvious first thing anyone does to change how their documents look, so it is
+# exactly the file an uninstall must not take away.
+echo '/* mine */' >> "$PDFULATOR_HOME/themes/default/print.css"
 out=$("$PDFULATOR_BIN/pdfulator" --uninstall 2>&1)
-want "edited file"           exists "$PDFULATOR_HOME/theme/print.css"
+want "edited file"           exists "$PDFULATOR_HOME/themes/default/print.css"
 want "untouched shipped file" gone  "$PDFULATOR_HOME/lib/jobs.sh"
 check_message "$out"
 

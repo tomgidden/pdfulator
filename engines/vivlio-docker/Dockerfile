@@ -49,8 +49,10 @@ RUN bun install --frozen-lockfile
 # there are themes now, and the wrapper stages a theme into one directory and
 # mounts it. An image carrying its own copy would be a second opinion about
 # what a document should look like.
-COPY theme    ./theme
-COPY themes   ./themes
+# themes/ so a `--theme classic` works inside the image too; theme/ is the
+# fallback for a run that supplies none, and is themes/default.
+COPY themes         ./themes
+COPY themes/default ./theme
 COPY engines/vivlio/main.js ./
 
 # Where the wrapper mounts things. Created here, and owned by the runtime user,

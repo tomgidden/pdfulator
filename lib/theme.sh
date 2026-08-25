@@ -24,7 +24,12 @@
 : "${PDFULATOR_DIR:=$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)}"
 : "${PDFULATOR_HOME:=$HOME/.local/share/pdfulator}"
 
-BUILTIN_THEME="$PDFULATOR_DIR/theme"
+# `pdfulator doc.md` with no --theme resolves to this. themes/default rather
+# than a separate directory of its own: it is the floor the cascade already
+# stands on -- resets, the three font roles, base-14 fonts, nothing fetched --
+# so making it the default means the unthemed case and the bottom of every
+# theme's inheritance chain are the same files, and cannot drift apart.
+BUILTIN_THEME="$PDFULATOR_DIR/themes/default"
 
 
 # How resolution reports failure. Overridable by the caller, as jobs_error is,

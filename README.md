@@ -5,7 +5,7 @@ authors:
 date:
   month: August
   year: 2026
-revision: v.2
+revision: v.3
 pdfulator_features: shade_monospace narrow_monospace justify
 ...
 
@@ -15,65 +15,74 @@ pdfulator_features: shade_monospace narrow_monospace justify
 
 ## Introduction
 
-`pdfulator` is a Markdown-to-PDF converter using:
+`pdfulator` converts Markdown to PDF, and tries to be the one command you need
+rather than a pipeline you have to assemble yourself.
 
-- _[markdown-it](https://github.com/markdown-it/markdown-it)_ - Markdown parser
-- _[Vivliostyle](https://vivliostyle.org/)_ - Pagination, styling, PDF export
-- _[Mustache](https://mustache.github.io/)_ - Templating
-- _[Puppeteer](https://pptr.dev/)_ - Browser control
-- _[Bun](https://bun.sh/)_ - lightweight, powerful JS engine
-
-and optionally:
-
-- _[Docker](https://docker.com)_ - a containerization engine
-- _[Chromium](https://www.chromium.org)_ - contained browser for Puppeteer
-
-or:
-
-- Your existing installation of a browser that Puppeteer can control.
-
-It's not rocket science, but it's fiddly and usually not worth spending the time to assemble into a single utility.  That's what this is for.
-
-## Modes
-
-This version of `pdfulator` is designed to work in two different modes, both
-of which are valid, and both have pros and cons.
-
-### Dockerized
-
-The utility can be packaged as a Docker image, to fully self-contain it. If you're
-already a Docker user, this is neat. You can pull down the image from Docker Hub:
+There is more than one good way to get from Markdown to a paginated PDF, and
+they disagree about interesting things — how much Markdown they understand, how
+faithfully they paginate, whether they need a browser, whether they render the
+same on your laptop as on a build server. So `pdfulator` does not pick one. It
+provides several **engines**, and one interface over all of them:
 
 ```zsh
-docker pull tomgidden/pdfulator:2
-docker tag tomgidden/pdfulator:2 pdfulator
+pdfulator report.md                      # the default engine
+pdfulator --engine pandoc-pagedjs report.md
+pdfulator --list-engines                 # what's installed
 ```
 
-or you can build it yourself. To build the image, run:
+Whichever you choose, the command's own behaviour does not change. It plans the
+job — which files, where the output goes, whether it needs rebuilding, whether
+to watch for changes — and resolves the theme. The engine only ever converts
+one document.
+
+## Engines
+
+```
+  pandoc-pagedjs   Markdown via Pandoc, paginated by Paged.js, rendered by Chromium
+  pandoc-xslt      Markdown via Pandoc and DocBook, typeset by XSL-FO and Apache FOP  (deprecated)
+* vivlio           Markdown via markdown-it, paginated by Vivliostyle, rendered by Chromium
+  vivlio-docker    As vivlio, but containerised: no runtime, browser or deps on the host
+```
+
+**`vivlio`** is the default and runs on your own machine, so it renders with
+your own fonts — which is why it is the default rather than the containerised
+one. It uses _[markdown-it](https://github.com/markdown-it/markdown-it)_,
+_[Vivliostyle](https://vivliostyle.org/)_,
+_[Mustache](https://mustache.github.io/)_ and
+_[Puppeteer](https://pptr.dev/)_, on [bun](https://bun.sh) or any node or deno
+you already have, driving a Chromium-based browser.
+
+**`vivlio-docker`** is the same pipeline in a container: nothing installed on
+the host, no runtime, no browser, no dependencies. The trade is fonts — a
+container has only the fonts baked into it, so a document leaning on something
+installed locally renders differently. Reproducible-everywhere and
+looks-like-my-laptop are different wants, and only you know which you have.
+
+**`pandoc-pagedjs`** is v1's pipeline, rebuilt: _[Pandoc](https://pandoc.org)_
+parses, _[Paged.js](https://pagedjs.org)_ paginates, Chromium prints. Kept
+because it is genuinely different rather than merely older — Pandoc reads far
+more Markdown than markdown-it does, bringing definition lists, footnotes and
+tables that `vivlio` has not got.
+
+**`pandoc-xslt`** is the oldest pipeline still standing, from the DocBook and
+XSL-FO days, and is deprecated from the day it ships. XSL-FO is a dead
+standard and FOP is its last maintained implementation — but the typesetting is
+genuinely better than the browser engines', and fifteen years of accumulated
+layout work is not something to throw away. It is here because that output is
+worth keeping, not because anyone should start a new document with it.
+
+The container engines need only Docker. `pdfulator` fetches the image the first
+time you use one, and says so:
 
 ```zsh
-make build
+pdfulator --engine vivlio-docker report.md
+pdfulator --prepare              # or fetch it now, before you need it
 ```
 
-or manually:
+Your choice is remembered, so `--engine` is something you set once rather than
+type every time.
 
-```zsh
-docker build -t pdfulator .
-```
-
-Then:
-
-```
-docker run --rm --init -i pdfulator - < foo.md > foo.pdf
-```
-
-or
-
-```
-docker run --rm --init -v $(pwd):/in pdfulator --watch
-```
-
-### Bundled
+## Installing
 
 Install with:
 
@@ -155,18 +164,23 @@ source is left alone, and says so.
 | Option | Meaning |
 | --- | --- |
 | `-t`, `--theme <name\|path>` | Theme to use |
-| `-d`, `--debug` | Keep the intermediate HTML |
+| `--css <file>` | Extra stylesheet, applied after the theme |
+| `--font-fallback` | Use standard PDF fonts when one can't be had |
+| `-e`, `--engine <id>` | Engine to use (remembered) |
+| `--list-engines` | Show the installed engines |
+| `-d`, `--debug` | Keep the intermediate files |
 | `-v`, `--verbose` | Verbose output |
 | `-w`, `--watch` | Watch a directory for changes |
 | `-h`, `--help` | Show help |
 
-The bundled wrapper adds a few of its own:
+And for setting things up:
 
 | Option | Meaning |
 | --- | --- |
 | `--install` | Choose a runtime and browser, asking if there's a terminal |
 | `-b`, `--browser auto\|find\|install\|<path>` | Choose the rendering browser (remembered) |
 | `--install-runtime` | Download a private copy of _bun_ if none is installed |
+| `--prepare` | Fetch what the chosen engine needs, now rather than on first use |
 | `--setup-status` | Report what is still needed |
 | `--update` | Install a newer release, if there is one |
 | `--version` | Report the installed version |
@@ -205,14 +219,18 @@ default), plus the wrapper itself in `$PDFULATOR_BIN` (`~/.local/bin`):
 
 | Path | Contents | Size |
 | --- | --- | --- |
-| `lib/`, `defaults/`, `theme/` | The command's shared layer and assets | small |
+| `lib/`, `theme/` | The command's shared layer | small |
+| `themes/<name>/` | The bundled themes, and any you add | ~3MB |
 | `engines/<id>/` | One converter each — see `--list-engines` | small |
 | `engines/<id>/node_modules/` | An engine's dependencies, if it has any | ~30MB |
+| `fonts/` | Fonts a theme downloaded, shared between themes | varies |
+| `cache/` | Themes prepared for an engine; rebuilt when needed | small |
 | `bun/` | Private _bun_, only if you asked for one | ~60MB |
 | `chromium/` | `chrome-headless-shell`, only if you asked for one | ~193MB |
 
 Dependencies are per-engine and installed on first use, so you only pay for
-the engines you actually run.
+the engines you actually run. The same is true of container images and of any
+fonts a theme fetches: nothing arrives until something needs it.
 
 `pdfulator --uninstall` removes all of it — including the `pdfulator` command
 itself — except files you have added or modified. Your themes and any edited
@@ -221,81 +239,174 @@ to keep, the directory goes too.
 
 ## Customisation and development
 
-Working on pdfulator itself needs [bun](https://bun.sh) and a Chromium-based
-browser:
+The wrapper runs from a checkout exactly as it does when installed, finding
+`lib/`, `engines/` and `themes/` beside itself:
 
 ```zsh
-CHROME_PATH=/path/to/chrome ./pdfulator.sh README.md
+./pdfulator.sh README.md
 ```
 
-The wrapper runs from a checkout as it does when installed, finding `lib/` and
-`engines/` beside itself. An engine's dependencies install on first use.
+What you need depends on which engine you are working on, and nothing more: the
+container engines need only Docker, and `vivlio` needs
+[bun](https://bun.sh) (or node, or deno) and a Chromium-based browser. An
+engine's dependencies install on first use.
 
-`--debug` keeps the generated HTML next to the PDF, which is usually what you
-want when adjusting a theme; `--watch` re-renders on every save:
+`--debug` keeps the intermediate files, which is usually what you want when
+adjusting a theme; `--watch` re-renders on every save:
 
 ```zsh
 ./pdfulator.sh --debug --theme ./my_theme README.md
 ./pdfulator.sh --watch .
 ```
 
-To build the distributable wrapper from a checkout:
+Everything is POSIX `sh` — no bashisms — because it has to run under `dash` on
+Debian as happily as under `zsh` on macOS.
 
 ```zsh
+make test-lib         # the shell suites: no browser, no Docker, ~90s
+make test             # ...and the ones needing a browser or a tarball
 make dist             # produces ./pdfulator.tar.gz, what CI publishes
 make install-local    # ...and installs it, exactly as install.sh would
 ```
 
-## Styling
+`make test-lib` is the one to run while working. It is a few hundred
+assertions over the job planner, theme resolution, the font cascade, engine
+dispatch and watch mode, and it needs nothing installed.
 
-The current CSS is a simple Humanist "white-paper" layout typical of my general tastes. I was influenced in my youth by the original [1995 Java™ white paper](https://web.archive.org/web/20240524160851/https://www.stroustrup.com/1995_Java_whitepaper.pdf)s and other documentation from Sun, and this is somewhat simplified version. It's very rough-and-ready, but it does enough for me right now.  I have been wondering if it's worth having multiple themes somehow.
+## Themes
 
-You can override the styling with a theme folder of your own containing custom stylesheets, fonts and other assets. These override the ones in `defaults`:
+A theme is a directory. `pdfulator` ships two:
 
-```zsh
-pdfulator --theme ./my_theme foo.md
-```
-
-A named theme is looked for in, in order: `./themes/<name>/`,
-`$PDFULATOR_HOME/themes/<name>/`, then `themes/<name>/` alongside the script. So
-a theme installed in the second of those is available anywhere:
-
-```zsh
-pdfulator --theme corporate foo.md
-```
-
-If the named theme isn't found, pdfulator stops and says where it looked. It
-won't quietly fall back to the default — a typo would otherwise produce a
-perfectly plausible PDF in the wrong style, which you'd only catch by eye.
-
-Under Docker, mount the theme into the container instead:
+- **`default`** — standard PDF fonts (Times, Helvetica, Courier), sane resets,
+  no layout. It needs no network and no downloads, which is what makes it the
+  floor everything else stands on.
+- **`classic`** — the "white-paper" look: TeX Gyre Pagella, Open Sans and Noto
+  Sans Mono, with running headers and footers. Influenced in my youth by the
+  original [1995 Java™ white
+  paper](https://web.archive.org/web/20240524160851/https://www.stroustrup.com/1995_Java_whitepaper.pdf)
+  and other documentation from Sun.
 
 ```zsh
-docker run --rm --init -i -v $(pwd)/my_theme:/app/theme \
-  tomgidden/pdfulator:2 - < foo.md > foo.pdf
+pdfulator --theme classic report.md
+pdfulator --theme ./my_theme report.md
+pdfulator --css tweaks.css report.md      # one-off, on top of the theme
 ```
+
+A named theme is looked for in `./themes/<name>/`,
+`$PDFULATOR_HOME/themes/<name>/`, then `themes/<name>/` alongside the command,
+so a theme installed in the second is available anywhere. If it isn't found,
+`pdfulator` stops and says where it looked rather than quietly using the
+default — a typo would otherwise produce a perfectly plausible PDF in the wrong
+style, which you'd only catch by eye.
+
+### Writing one
+
+```
+my_theme/
+  theme.conf                    name, description, and what it extends
+  fonts.conf                    fonts, by role
+  print.css                     styling for any engine
+  fonts/                        font files, if it ships any
+  stylers/vivliostyle/          styling for a particular renderer
+  stylers/pagedjs/
+  engines/pandoc-xslt/          ...or for one specific engine
+```
+
+Everything is optional. A theme is data throughout — nothing in it is ever
+executed, which matters because themes are meant to be shared.
+
+**Themes extend other themes.** `theme.conf` names a parent:
+
+```conf
+name = palatino
+description = Classic, but with a different body font
+extends = classic
+```
+
+and supplies only its differences. CSS is concatenated parent-first, so a
+child's rules win by ordinary precedence. Fonts are inherited **per role**, so
+a theme changing only its body font keeps its parent's headings and monospace
+untouched — which means a theme can be one short file.
+
+**Fonts are declared, not linked.** `fonts.conf` names them by role:
+
+```conf
+body.family = EB Garamond
+body.source = local
+body.face.400.normal.file = fonts/EBGaramond-Regular.ttf
+body.face.700.normal.file = fonts/EBGaramond-Bold.ttf
+
+heading.family = Figtree
+heading.source = url
+heading.face.400.normal.url    = https://example.org/Figtree-Regular.ttf
+heading.face.400.normal.sha256 = a1b2c3...
+```
+
+`source` is `local` (a file in the theme), `url` (fetched once, cached under
+`$PDFULATOR_HOME/fonts/`, verified if you give a checksum) or `none` (the
+standard PDF fonts, which need no file at all).
+
+The roles `body`, `heading` and `mono` are understood by every engine. That
+indirection is the point: your stylesheets refer to
+`var(--pdfulator-body)` rather than to a font by name, so changing the font is a
+`fonts.conf` edit and no CSS changes at all. `pdfulator` generates whatever the
+chosen engine actually needs from that one declaration — `@font-face` rules for
+the browser engines, an explicit font configuration for FOP.
+
+**A font that can't be had is an error**, naming the role, the font and why:
+
+```
+Error: this theme needs a font it cannot get.
+  role:   body
+  font:   EB Garamond (local)
+  reason: no such file: /path/to/my_theme/fonts/EBGaramond-Regular.ttf
+
+Render anyway with standard PDF fonts:
+  pdfulator --font-fallback ...
+```
+
+That is the whole reason for declaring fonts rather than just linking them. A
+font named in one place and missing from another is how a document renders in
+the wrong typeface for years without anyone noticing.
+
+**Per-engine styling.** Different renderers present different DOMs, so a theme
+can hold CSS for a particular one under `stylers/<styler>/` — `vivliostyle`,
+`pagedjs` or `xsl-fo`. `stylers/` rather than per-engine because `vivlio` and
+`vivlio-docker` are the same renderer and would otherwise need two identical
+copies. `engines/<id>/` is there for the rarer case of a genuine
+engine-specific difference, and wins over both.
 
 ### Logo
 
-If the theme folder contains a file called `logo.svg`, it should appear in the top-right.  However, to customise the positioning and style, you'll have to use a little custom CSS.  As there's a little quirk somewhere, you have to add a little content, even though it's specified in the main stylesheet:
+If the theme contains a `logo.svg`, the stylesheet can place it in the page
+margin. To position or size it, use a little custom CSS — and note the quirk
+that you have to set `content`, even though the main stylesheet already does:
 
 ```css
 @page {
   @top-right {
-    content: string("");                    /* seemingly important*/
+    content: string("");                    /* seemingly important */
     background-image: url(/theme/logo.svg);
     background-size: 108pt auto;            /* here's how to size the image */
-    /* control `height`, `margin-top` and `margin-right` appropriately, but check 
+    /* control `height`, `margin-top` and `margin-right` appropriately, but check
      * it doesn't crash into content on page 2 onwards.
      */
   }
 }
 ```
 
+**Known bug:** this does not currently work under the `vivlio` engine — the
+image is staged and the rule is in the stylesheet, but nothing is drawn. It
+predates the theme system rather than being caused by it, and it is on the TODO
+below.
 
 ## Document metadata
 
-To support the top front-matter in a Markdown file, you can include a YAML block at the top of the file delineated by `---` and `...`; see this `README.yaml` file for an example.
+To support the top front-matter in a Markdown file, you can include a YAML block
+at the top of the file delineated by `---` and `...` — this README begins with
+one. Alternatively, put it in a `.yaml` file beside the document
+(`report.md` and `report.yaml`), which keeps the Markdown clean and is picked up
+automatically.
 
 Unfortunately, other Markdown renderers (notably _[GitHub](https://github.com/tomgidden/pdfulator)_) may include this as garbled nonsense in their output.
 
@@ -365,31 +476,47 @@ These include:
 
 - `strong_href` -- embolden hyperlinks to make them stand out.
 
-## Adding a logo
-
-If there is a file `logo.svg` in the `theme` folder, it will be used in the top-right header box.
-
 # TODO
 
-[X] _Themes_.  
+[X] _Themes_.
+
+[X] _Built-in themes_. `default` and `classic` ship; `--theme` picks one.
+
+[X] _Multiple files_. Handled by the directory form (`pdfulator src/ out/`)
+rather than a list of filenames, so an argument's meaning never depends on how
+many files a glob matched.
+
+[X] _One-line installer_. `curl -fsSL https://pdfulator.app/get | sh`, with the
+wrapper distributed from CI rather than built from a checkout.
+
+[X] _Testing of `--watch`_. Poll, `fswatch` and `inotifywait` branches all
+covered, including the self-triggering case where a rendered PDF looks like a
+change.
+
+[ ] _More themes_, and a way to install one you didn't write.
+
+[ ] _Fix the margin-box logo_. `@top-right { background-image: ... }` draws
+nothing under `vivlio`, though the asset is staged and served. Long-standing;
+`classic` ships a `logo.svg` that consequently never appears.
 
 [ ] _TOCs_
 
-[ ] _Better images_. Assets in the theme folder can be referenced, and remote URLs presumably work.  Under Docker they still have to be mounted in, which is awkward.  More thought needed.
+[ ] _Better images_. Assets in the theme folder can be referenced, and remote
+URLs presumably work. Under Docker they still have to be mounted in, which is
+awkward. More thought needed.
 
-[ ] _Improved layout_. This is still a work in progress.
-
-[ ] _Built-in themes_. Instead of having to make a theme, have some premade ones available with settings in metadata.
+[ ] _Improved layout_. `classic` renders differently under each engine, since
+its two stylesheets are two generations of the same file. Making them agree is
+its own job.
 
 [ ] _Comprehensive support for the format_
 
-[ ] _HTML_, _EPUB_, etc. The pipeline already produces HTML on the way to PDF, so exposing it should be straightforward. I'm just an old fart that likes neat A4 documents even if I never actually print them out.
+[ ] _HTML_, _EPUB_, etc. The pipeline already produces HTML on the way to PDF,
+so exposing it should be straightforward. I'm just an old fart that likes neat
+A4 documents even if I never actually print them out.
 
-[X] _Multiple files_. Handled by the directory form (`pdfulator src/ out/`) rather than a list of filenames, so an argument's meaning never depends on how many files a glob matched.
-
-[ ] Testing of `--watch` and improvement on file globbing and so on.
-
-[ ] _One-line installer_. `curl -fsSL https://.../install.sh | bash`, with the wrapper distributed from CI rather than built from a checkout.
+[ ] _A `remote` engine_, so the work can happen on a server rather than on your
+laptop.
 
 Any feedback, assistance or code contributions welcome.
 
@@ -411,10 +538,25 @@ There are a lot of projects called `docbot` and a lot called `md2pdf`. None of t
 
 - v1.1.2: Preservation of work folder (now in `/work`), and minor styling for logos
 
+- v2: Rewritten around markdown-it and Vivliostyle, with a one-line installer,
+  a `--watch` that works, and themes.
+
+- v3: Several engines rather than one pipeline, each behind the same interface;
+  themes that inherit from each other and declare their fonts rather than
+  linking them.
+
 # Licence
 
 I hereby release the parts of this project I have written freely under [Creative Commons CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/?ref=chooser-v1).  Attribution and code contributions would be nice though.
 
-This clearly does not apply for the third-party sub-components it uses or the fonts in the `assets` folder which are released under their own licences: [OFL](https://github.com/google/fonts/blob/main/LICENSE) and the GUST/LPPL licence as appropriate.
+This clearly does not apply to the third-party sub-components it uses, nor to
+the fonts bundled with the `classic` theme in `themes/classic/fonts/`, which are
+released under their own licences: [OFL](https://github.com/google/fonts/blob/main/LICENSE)
+and the GUST/LPPL licence as appropriate. Their licence files sit beside them.
 
-I've included the fonts (and their licences) in this package purely for performance and simplicity: otherwise they either need to be downloaded on each invocation, or cached somehow between Docker runs, leaving junk on the host machine. I hope that's okay within the terms of those licences.
+I've bundled those fonts purely for performance and simplicity: otherwise they
+either need downloading on each invocation, or caching somehow between Docker
+runs, leaving junk on the host machine. I hope that's okay within the terms of
+those licences. A theme you write yourself can equally well fetch its fonts
+rather than ship them — see `fonts.conf` above — in which case they are cached
+once under `$PDFULATOR_HOME/fonts/` and shared between themes.

@@ -76,7 +76,9 @@ COPY engines/pandoc-xslt/xsl        /engine/xsl
 COPY engines/pandoc-xslt/metadata.lua /engine/metadata.lua
 
 # The built-in theme, so the image works with no mounts at all.
-COPY theme /theme
+# The fallback theme, for a run that supplies none. Normally the wrapper
+# stages one and mounts it over this.
+COPY themes/default /theme
 
 # /work is 1777 rather than owned by a user: the wrapper passes the caller's
 # uid, which exists in no /etc/passwd here and so cannot write a directory

@@ -23,7 +23,7 @@ fixture() {
 	mkdir -p "$BASE/cwd/themes/local" \
 	         "$BASE/home/themes/installed" \
 	         "$BASE/dist/themes/shipped" \
-	         "$BASE/dist/theme" \
+	         "$BASE/dist/themes/default" \
 	         "$BASE/elsewhere/handwritten"
 
 	# The same name in all three roots, to prove which one wins.
@@ -33,7 +33,10 @@ fixture() {
 
 	PDFULATOR_HOME="$BASE/home"
 	PDFULATOR_DIR="$BASE/dist"
-	BUILTIN_THEME="$PDFULATOR_DIR/theme"
+	# The unthemed default is themes/default, not a directory of its own: it is
+	# the same floor every theme's inheritance chain already ends at, so the two
+	# cannot drift apart.
+	BUILTIN_THEME="$PDFULATOR_DIR/themes/default"
 	cd "$BASE/cwd" || exit 1
 }
 
@@ -93,7 +96,7 @@ sete "a missing theme fails, guarded"  'x=$(theme_resolve nosuch 2>/dev/null) ||
 
 
 echo "============ DEFAULT ============"
-run ok "$BASE/dist/theme"
+run ok "$BASE/dist/themes/default"
 
 echo "============ NAMES ============"
 run ok   "$BASE/cwd/themes/local"      local

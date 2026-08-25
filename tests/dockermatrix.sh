@@ -106,7 +106,7 @@ for _spec in $ENGINES; do
 	# The three contract arguments are rewritten to container paths, in order, and
 	# nothing else follows them -- an engine that appended its own flag after the
 	# theme would break every image's argument parsing.
-	check "contract args are container paths" "/in/a.md /out/a.pdf $BUILTIN" \
+	check "contract args are container paths" "/in/a.md /out/a.pdf /theme" \
 	      "$(contract "$OUT")"
 	check "the image is named" "yes" "$(has "$OUT" "$IMAGE")"
 	check "the run is disposable" "yes" "$(has "$OUT" "--rm")"
@@ -172,21 +172,36 @@ for _spec in $ENGINES; do
 	      "$(has "$OUT" "$BASE/src:/in:ro")"
 	check "same dir in and out: writable out" "yes" \
 	      "$(has "$OUT" "$BASE/src:/out")"
-	check "and the contract names both" "/in/a.md /out/a.pdf $BUILTIN" \
+	check "and the contract names both" "/in/a.md /out/a.pdf /theme" \
 	      "$(contract "$OUT")"
 
 
 	echo "============ THEME ============"
-	# The built-in theme is already inside the image. Mounting it would replace a
-	# copy with an identical copy, and would fail outright where the daemon cannot
-	# reach the install directory (a remote or rootless daemon, or a tarball under
-	# a home the VM does not share).
+	# Every theme given is mounted, including one that happens to live inside
+	# the install directory.
+	#
+	# There used to be a special case here: a theme equal to $PDFULATOR_DIR/theme
+	# was *not* mounted, since the image already carried an identical copy. That
+	# stopped being true when the wrapper began staging themes -- what arrives
+	# now is a directory built per engine under $PDFULATOR_HOME/cache, holding
+	# the concatenated CSS, the fetched fonts and the generated configuration.
+	# Skipping the mount would hand the container the theme baked in at build
+	# time and silently ignore the user's, which is a wrong PDF rather than an
+	# error. The image's own copy is only the fallback when no theme is given.
 	fixture
 	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
-	check "the built-in theme is not mounted" "no" \
+	check "a theme inside the install dir is still mounted" "yes" \
 	      "$(has "$OUT" "$BASE/dist/theme:/theme:ro")"
-	check "the built-in theme uses the image's copy" "$BUILTIN" \
+	check "and becomes /theme" "/theme" \
 	      "$(printf '%s\n' "$OUT" | tail -1)"
+
+	# No theme at all: nothing to mount, so the image's own copy is used.
+	fixture
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "")
+	check "no theme falls back to the image's copy" "$BUILTIN" \
+	      "$(printf '%s\n' "$OUT" | tail -1)"
+	check "and mounts nothing at /theme" "no" \
+	      "$(has "$OUT" ":/theme:ro")"
 
 	fixture
 	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/my themes/plain")

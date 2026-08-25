@@ -227,12 +227,19 @@ mv "$staging" "$PDFULATOR_HOME"
 
 # Record what we shipped, before anything generates node_modules, so the
 # wrapper's --uninstall can tell our files from the user's later.
+#
+# themes/ IS recorded, though it once was not. The exclusion made sense while
+# every theme under there was the user's; now `default` and `classic` ship in
+# it, and leaving them out stranded them at uninstall -- a clean removal left
+# nineteen files behind and refused to take the directory with it. Nothing is
+# lost by recording them: the manifest is walked by content hash, so a shipped
+# theme the user has edited is kept exactly as any other edited file is, and a
+# theme they added is simply not in the list.
 (
 	cd "$PDFULATOR_HOME"
 	find . -type f \
 		! -name .manifest ! -name .installed ! -name .browser ! -name .runtime \
-		! -path './node_modules/*' ! -path './bun/*' ! -path './chromium/*' \
-		! -path './themes/*' |
+		! -path './node_modules/*' ! -path './bun/*' ! -path './chromium/*' |
 		sed 's|^\./||' |
 		while IFS= read -r rel; do
 			printf '%s  %s\n' "$(hash_file "$rel")" "$rel"
