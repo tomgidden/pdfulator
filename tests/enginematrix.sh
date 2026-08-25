@@ -245,6 +245,111 @@ rm -rf "$ENGINES_DIR"/*
 check "no engines is explicable" "1" "$(engines_describe | grep -c 'No engines')"
 
 
+echo "============ PREPARE ============"
+#
+# First-run setup: the engine-specific half of the dependency split. The
+# shared half (a runtime, a browser, a docker daemon) is the wrapper's and is
+# tested where it lives; what is checked here is that `prepare` runs when it
+# should, does not when it shouldn't, and that a failure stops the run.
+#
+# The version is pinned rather than read from a VERSION file, so these cases
+# do not change meaning when the release does.
+PDFULATOR_PREPARE_VERSION=test-1
+
+# An engine whose prepare records that it ran, and exits how it is told to.
+make_prepare() {  # make_prepare <id> <exit-status>
+	cat > "$ENGINES_DIR/$1/prepare" <<EOF
+#!/bin/sh
+printf '%s\n' "$1" >> "$BASE/prepared"
+exit $2
+EOF
+	chmod +x "$ENGINES_DIR/$1/prepare"
+}
+
+prep_setup() {  # prep_setup — the standard cast, plus a clean prepare log
+	setup
+	: > "$BASE/prepared"
+}
+
+# `grep -c` exits 1 on no matches, so a bare `|| echo 0` prints grep's own
+# zero *and* the fallback. wc counts an empty file as zero without failing.
+prep_ran() { wc -l < "$BASE/prepared" 2>/dev/null | tr -d ' '; }
+
+prep_setup
+make_prepare vivlio 0
+engine_prepare vivlio
+check "prepare runs the first time"  "1" "$(prep_ran)"
+engine_prepare vivlio
+check "and not the second"           "1" "$(prep_ran)"
+check "the engine is marked ready"   "0" "$(engine_prepared vivlio; echo $?)"
+
+# An engine with no prepare is the common case, not an error: most engines
+# have nothing of their own to fetch.
+prep_setup
+check "no prepare is not a failure"  "0" "$(engine_prepare pandoc-xslt; echo $?)"
+check "and it counts as prepared"    "0" "$(engine_prepared pandoc-xslt; echo $?)"
+
+# The stamp lives under PDFULATOR_HOME, never in the engine directory: an
+# engine directory is shipped content, and --uninstall tells shipped files
+# from edited ones by hash. A stamp beside `convert` would make the engine
+# look modified and outlive the uninstall that should have taken it.
+prep_setup
+make_prepare vivlio 0
+engine_prepare vivlio
+check "the stamp is in PDFULATOR_HOME" "0" \
+      "$([ -f "$PDFULATOR_HOME/.prepared/vivlio" ]; echo $?)"
+check "and not in the engine"          "1" \
+      "$([ -f "$ENGINES_DIR/vivlio/.prepared" ]; echo $?)"
+
+# A failed prepare is fatal, and leaves no stamp -- so the next run retries
+# rather than recording a download that never happened.
+prep_setup
+make_prepare vivlio 1
+check "a failing prepare fails"      "1" "$(engine_prepare vivlio 2>/dev/null; echo $?)"
+check "and writes no stamp"          "1" "$(engine_prepared vivlio; echo $?)"
+check "and says which engine"        "1" \
+      "$(engine_prepare vivlio 2>/dev/null; printf '%s' "$ERRMSG" | grep -c 'vivlio')"
+
+# An update invalidates every stamp at once: a new release may pin a different
+# tool or a different image tag, and the alternative is each prepare inventing
+# its own freshness check.
+prep_setup
+make_prepare vivlio 0
+engine_prepare vivlio
+PDFULATOR_PREPARE_VERSION=test-2
+check "a new version is not prepared" "1" "$(engine_prepared vivlio; echo $?)"
+engine_prepare vivlio
+check "so prepare runs again"         "2" "$(prep_ran)"
+PDFULATOR_PREPARE_VERSION=test-1
+
+# The escape hatch, for CI and for these matrices: nothing should reach the
+# network by accident. `force` -- which is what --prepare passes -- is not an
+# accident, so it overrides.
+# `VAR=1 somefunc` does not scope the variable to the call the way it does for
+# a command: for a *function* POSIX leaves the assignment in the shell
+# afterwards. Set and unset it explicitly, or it leaks into every later case.
+prep_setup
+make_prepare vivlio 0
+PDFULATOR_NO_PREPARE=1
+engine_prepare vivlio
+check "NO_PREPARE skips it"          "0" "$(prep_ran)"
+engine_prepare vivlio force
+check "but force overrides it"       "1" "$(prep_ran)"
+unset PDFULATOR_NO_PREPARE
+
+# force re-runs a prepared engine, which is the whole purpose of --prepare:
+# fetching now, on a connection you have, rather than during the first
+# conversion on one you haven't.
+prep_setup
+make_prepare vivlio 0
+engine_prepare vivlio
+engine_prepare vivlio force
+check "force ignores the stamp"      "2" "$(prep_ran)"
+
+unset PDFULATOR_NO_PREPARE
+PDFULATOR_PREPARE_VERSION=test-1
+
+
 echo "============ DISPATCH ============"
 setup
 CHROME_PATH=/fake/chrome engine_convert vivlio /in.md /out.pdf /theme
