@@ -4,8 +4,9 @@
 #                -t tomgidden/pdfulator:pandoc-xslt .
 #
 # Built from the repository root for consistency with the other engines, though
-# this one needs nothing from above its own directory: the XSLT carries its own
-# fonts, and the pipeline never touches defaults/ or the shared stylesheets.
+# this one needs nothing from above its own directory: the stylesheets are its
+# own, and its fonts arrive at run time in the theme the wrapper stages and
+# mounts, exactly as they do for the browser engines.
 FROM debian:12-slim
 
 LABEL maintainer="tom@gidden.net"
@@ -68,8 +69,9 @@ RUN set -eu; \
 
 # The engine's assets: the stylesheets, the fonts they name, the pandoc
 # template that produces DocBook, and the lua filter that fills in the year.
-# All the engine's own -- nothing here is shared with the browser engines,
-# which is why none of defaults/ is copied.
+# All the engine's own. No fonts among them: those belong to the theme, which
+# is mounted, and the wrapper generates the FOP configuration that names them
+# (see fonts_fop_xconf and the fop-fonts.xconf that `render` prefers).
 COPY engines/pandoc-xslt/xsl        /engine/xsl
 COPY engines/pandoc-xslt/metadata.lua /engine/metadata.lua
 
