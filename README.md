@@ -395,10 +395,7 @@ that you have to set `content`, even though the main stylesheet already does:
 }
 ```
 
-**Known bug:** this does not currently work under the `vivlio` engine — the
-image is staged and the rule is in the stylesheet, but nothing is drawn. It
-predates the theme system rather than being caused by it, and it is on the TODO
-below.
+The margins around it are not great yet — see the TODO.
 
 ## Document metadata
 
@@ -495,9 +492,9 @@ change.
 
 [ ] _More themes_, and a way to install one you didn't write.
 
-[ ] _Fix the margin-box logo_. `@top-right { background-image: ... }` draws
-nothing under `vivlio`, though the asset is staged and served. Long-standing;
-`classic` ships a `logo.svg` that consequently never appears.
+[ ] _Tidy the margin-box logo_. It renders, but the spacing around it wants
+work, and it should be verified across all four engines rather than just the
+default one.
 
 [ ] _TOCs_
 

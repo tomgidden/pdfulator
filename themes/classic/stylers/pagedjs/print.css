@@ -147,15 +147,8 @@ body {
   size: A4;
   margin: 1in 0.75in;
 
-  @top-right {
-    content: string("");
-    height: 72pt;
-    margin-top: var(--L);
-    background-image: url(/theme/logo.svg);
-    background-repeat: no-repeat;
-    background-position: right top;
-    background-size: auto var(--L);
-  }
+  /* The logo is placed by the generated logo.css, from theme.conf. A theme
+     wanting it elsewhere sets logo.position rather than editing this. */
 
   @bottom-left {
     font-family: var(--pdfulator-heading);

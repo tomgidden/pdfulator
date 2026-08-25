@@ -64,6 +64,7 @@ const FALLBACK_TMPL = `<!DOCTYPE html>
   <title>{{title}}</title>
   <link rel="stylesheet" href="/theme/fonts.css">
   <link rel="stylesheet" href="/theme/print.css">
+  <link rel="stylesheet" href="/theme/logo.css">
 </head>
 <body class="{{pdfulator_features}}">
   <article>
