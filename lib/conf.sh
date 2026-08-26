@@ -61,6 +61,62 @@ conf_get() {  # conf_get <file> <key>
 }
 
 
+# Every value for one key, one per line, in file order.
+#
+#   conf_get_all <file> <key>
+#
+# The list counterpart to conf_get. Where conf_get answers "what is this set
+# to", taking the first occurrence and ignoring the rest, this answers "what
+# was added to this", and every occurrence counts.
+#
+# A separate function rather than a flag on conf_get, deliberately: conf_get's
+# single-value contract is relied on throughout -- engine_get, the logo keys,
+# `extends` -- and a key that suddenly returned three lines where it used to
+# return one would break callers silently, in the direction of doing more than
+# was asked. Two functions with two contracts is the honest split.
+#
+# The `+` convention lives in the *value*, not here:
+#
+#   template.styling = ./base.css     replace the list with this
+#   template.styling = +./extra.css   add this to the list
+#
+# This function returns values verbatim, leading `+` included, because whether
+# a `+` means "add" depends on what the caller is accumulating -- and stripping
+# it here would make the two spellings indistinguishable to the one place that
+# has to tell them apart. See template_styling in lib/template.sh.
+#
+# Returns 1 when the file is missing, as conf_get does; prints nothing at all
+# when the file exists but the key is absent (an empty list, not an empty
+# value -- which is why this does not print the blank line conf_get does).
+conf_get_all() {  # conf_get_all <file> <key>
+	[ -f "$1" ] || return 1
+
+	while IFS= read -r _ca_line || [ -n "$_ca_line" ]; do
+		_ca_line=${_ca_line#"${_ca_line%%[! 	]*}"}
+		case $_ca_line in
+			''|'#'*) continue ;;
+		esac
+
+		_ca_key=${_ca_line%%=*}
+		if [ "$_ca_key" = "$_ca_line" ]; then continue; fi
+		_ca_key=${_ca_key%"${_ca_key##*[! 	]}"}
+		[ "$_ca_key" = "$2" ] || continue
+
+		_ca_val=${_ca_line#*=}
+		_ca_val=${_ca_val#"${_ca_val%%[! 	]*}"}
+		_ca_val=${_ca_val%"${_ca_val##*[! 	]}"}
+		# A key set to nothing contributes nothing. `template.styling =` is a
+		# way to write "no styling", not a way to add an empty filename to the
+		# list -- which would become a path resolving to the config file's own
+		# directory and be read as a stylesheet.
+		[ -n "$_ca_val" ] || continue
+		printf '%s\n' "$_ca_val"
+	done < "$1"
+
+	return 0
+}
+
+
 # Every key in a flat key=value file, one per line, in file order.
 #
 # Used to discover what a fonts.conf declares, since roles are not a fixed

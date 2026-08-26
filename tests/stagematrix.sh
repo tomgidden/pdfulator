@@ -14,6 +14,7 @@ LIB=$(cd "$(dirname "$0")/../lib" && pwd)
 . "$LIB/conf.sh"
 . "$LIB/paths.sh"
 . "$LIB/theme.sh"
+. "$LIB/template.sh"
 . "$LIB/fonts.sh"
 . "$LIB/stage.sh"
 
@@ -57,8 +58,25 @@ setup() {
 	echo 'DERIVED-CSS' > "$BASE/themes/derived/print.css"
 	echo 'VIVLIO-CSS'  > "$BASE/themes/derived/stylers/vivliostyle/print.css"
 
-	echo 'BASE-TMPL'    > "$BASE/themes/base/article.tmpl"
-	echo 'DERIVED-TMPL' > "$BASE/themes/derived/article.tmpl"
+	# Two template objects in two ecosystems, and an engine naming one. This is
+	# what replaced staging a file called article.tmpl out of the theme chain:
+	# the two files below have the same name and incompatible syntax, which is
+	# precisely the confusion the object type exists to prevent.
+	mkdir -p "$BASE/templates/mustache" "$BASE/templates/pandoc"
+	echo 'MUSTACHE-TMPL' > "$BASE/templates/mustache/article.tmpl"
+	echo 'PANDOC-TMPL'   > "$BASE/templates/pandoc/article.tmpl"
+	printf 'template.structure = ./article.tmpl\n' \
+		> "$BASE/templates/mustache/template.conf"
+	printf 'template.structure = ./article.tmpl\n' \
+		> "$BASE/templates/pandoc/template.conf"
+	TEMPLATES_DIR="$BASE/templates"
+
+	mkdir -p "$BASE/engines/vivlio" "$BASE/engines/pandoc-pagedjs"
+	printf 'styler=vivliostyle\ntemplate=mustache\n' \
+		> "$BASE/engines/vivlio/engine.conf"
+	printf 'styler=pagedjs\ntemplate=pandoc\n' \
+		> "$BASE/engines/pandoc-pagedjs/engine.conf"
+	ENGINES_DIR="$BASE/engines"
 
 	printf 'extends = base\n' > "$BASE/themes/derived/theme.conf"
 
@@ -91,9 +109,44 @@ ok "the styler's CSS comes last" "yes" \
 ok "each part says where it came from" "3" \
 	"$(grep -c '/\* --- ' "$d/print.css")"
 
-# A template is replaced, not concatenated: half a template is not a template.
-ok "the child's template wins outright" "DERIVED-TMPL" \
+# The template comes from the engine's declared ecosystem, not from a file
+# named article.tmpl in the theme chain. This is the regression that mattered:
+# both templates below are called article.tmpl and only one is Mustache.
+ok "the engine's template ecosystem is staged" "MUSTACHE-TMPL" \
 	"$(cat "$d/article.tmpl")"
+
+dp=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || dp=""
+ok "a different engine gets a different template" "PANDOC-TMPL" \
+	"$(cat "$dp/article.tmpl")"
+ok "and they are not the same staged directory" "no" \
+	"$([ "$d" = "$dp" ] && echo yes || echo no)"
+
+# The bug itself, stated as a property: a theme dropping an article.tmpl into
+# its own directory must not reach an engine of another ecosystem. Before the
+# template object this file was staged by name and pandoc received Mustache.
+echo 'THEME-MUSTACHE' > "$BASE/themes/derived/article.tmpl"
+dp2=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || dp2=""
+ok "a theme's stray article.tmpl does not reach another ecosystem" "PANDOC-TMPL" \
+	"$(cat "$dp2/article.tmpl")"
+rm -f "$BASE/themes/derived/article.tmpl"
+
+# A template's support files land beside its structure. The DocBook template
+# needs global.ent there, because the SYSTEM entity that pulls it in resolves
+# relative to the template -- staged without it, pandoc fails on the DTD subset
+# before the conversion starts.
+echo 'ENTITIES' > "$BASE/templates/pandoc/extra.ent"
+printf 'template.structure = ./article.tmpl\ntemplate.support = ./extra.ent\n' \
+	> "$BASE/templates/pandoc/template.conf"
+ds=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || ds=""
+ok "a support file is staged beside the structure" "ENTITIES" \
+	"$(cat "$ds/extra.ent" 2>/dev/null)"
+
+# And it is part of the identity: editing one must restage, or the cache serves
+# a directory built before the change.
+echo 'CHANGED' > "$BASE/templates/pandoc/extra.ent"
+ds2=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || ds2=""
+ok "editing a support file restages" "no" \
+	"$([ "$ds" = "$ds2" ] && echo yes || echo no)"
 
 
 section "STYLER AND ENGINE SELECTION"

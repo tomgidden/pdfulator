@@ -51,8 +51,16 @@ RUN bun install --frozen-lockfile
 # what a document should look like.
 # themes/ so a `--theme classic` works inside the image too; theme/ is the
 # fallback for a run that supplies none, and is themes/default.
+#
+# The template is copied in on top of that fallback theme. themes/default no
+# longer carries one -- it moved to templates/html-mustache-vivlio, so that a
+# template can be selected by ecosystem rather than by filename -- and without
+# this a bare `docker run` with no mounts would fall back to main.js's minimal
+# built-in rather than the real template.
 COPY themes         ./themes
+COPY templates      ./templates
 COPY themes/default ./theme
+COPY templates/html-mustache-vivlio/article.tmpl ./theme/article.tmpl
 COPY engines/vivlio/main.js ./
 
 # Where the wrapper mounts things. Created here, and owned by the runtime user,

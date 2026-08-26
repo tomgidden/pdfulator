@@ -140,7 +140,7 @@ if [ -n "${PDFULATOR_SOURCE:-}" ]; then
 	}
 	echo "  copying from $src" >&2
 
-	for _top in themes lib engines; do
+	for _top in themes templates lib engines; do
 		[ -d "$src/$_top" ] || continue
 		cp -R "$src/$_top" "$staging/"
 	done

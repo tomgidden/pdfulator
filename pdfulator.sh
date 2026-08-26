@@ -54,7 +54,7 @@ fi
 # resolution, browser discovery and watching are the wrapper's, and an engine
 # only converts. See lib/jobs.sh for why: these were implemented three times
 # over, in three languages, and the three disagreed.
-for _lib in conf paths jobs theme fonts stage browser watch engines; do
+for _lib in conf paths jobs theme template fonts stage browser watch engines; do
 	if [ -r "$PDFULATOR_DIR/lib/$_lib.sh" ]; then
 		. "$PDFULATOR_DIR/lib/$_lib.sh"
 	else

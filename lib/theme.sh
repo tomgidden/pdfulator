@@ -216,7 +216,7 @@ theme_chain() {  # theme_chain <theme-dir>
 #   stylers/<styler>/<name>   this renderer, docker or not
 #   <name>                    engine-agnostic
 #
-# and across the chain, the *child* wins: a theme overriding article.tmpl
+# and across the chain, the *child* wins: a theme overriding metadata.lua
 # replaces its parent's rather than adding to it. Prints every match, most
 # specific first, so a caller wanting one takes the first line and a caller
 # wanting to concatenate a cascade (CSS) reverses it.
@@ -245,7 +245,7 @@ theme_file() {  # theme_file <chain> <engine> <styler> <name>
 
 
 # The single most specific match, or nothing. What a caller wanting *the*
-# article.tmpl uses.
+# metadata.lua uses.
 theme_file_one() {  # theme_file_one <chain> <engine> <styler> <name>
 	theme_file "$@" | head -1
 }

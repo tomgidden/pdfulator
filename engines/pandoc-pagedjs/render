@@ -29,15 +29,24 @@ theme=${3:-/theme}
 # smuggle in layout that the stylesheet then cannot control.
 FORMAT=commonmark_x-raw_html+task_lists+definition_lists
 
-# A theme may override the template and the filter as well as the CSS. Checked
-# per run rather than baked in, since the theme directory is mounted at run
-# time and the image cannot know what is in it.
-# `if`, not `[ ... ] && ...`, throughout. Under `set -e` a bare test that
-# fails is a failing command, and if it is the last one in the script -- or
-# anywhere the shell is not already ignoring the status -- it exits. Silently:
-# no message, no non-zero status the caller can see a reason for. Three bugs
-# in lib/browser.sh were exactly this shape (daf9507), and a theme without an
-# article.tmpl is the common case here, so the false branch is the normal one.
+# The template comes from the staged directory, which the wrapper built.
+#
+# It used to be "the engine's, unless the theme has one", and that was the bug:
+# a theme's article.tmpl was staged by *name*, so themes/default's Mustache
+# template -- written for the vivlio engines -- was handed to pandoc, which
+# does not know that syntax and printed the markup into the PDF as literal
+# text. Every shipped theme did this.
+#
+# Staging now selects a template by ecosystem (HTML + pandoc $var$ here, not
+# HTML + Mustache), so what arrives under this name is always one pandoc can
+# fill. The engine's own copy remains the fallback for a bare `docker run` with
+# no theme mounted, which is a supported way to use these images.
+#
+# `if`, not `[ ... ] && ...`. Under `set -e` a bare test that fails is a
+# failing command, and if it is the last one in the script -- or anywhere the
+# shell is not already ignoring the status -- it exits silently: no message, no
+# non-zero status the caller can see a reason for. Three bugs in lib/browser.sh
+# were exactly this shape (daf9507).
 TEMPLATE=$ENGINE/article.tmpl
 if [ -f "$theme/article.tmpl" ]; then TEMPLATE=$theme/article.tmpl; fi
 
