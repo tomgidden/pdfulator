@@ -37,20 +37,20 @@ one document.
 
 ## Engines
 
-```
-  pandoc-pagedjs   Markdown via Pandoc, paginated by Paged.js, rendered by Chromium
-  pandoc-xslt      Markdown via Pandoc and DocBook, typeset by XSL-FO and Apache FOP  (deprecated)
-* vivlio           Markdown via markdown-it, paginated by Vivliostyle, rendered by Chromium
-  vivlio-docker    As vivlio, but containerised: no runtime, browser or deps on the host
-```
+| --engine= | Docker | Description |
+| --------- | :----: | ----------- |
+| **`vivlio`** | no | Default: _markdown-it_ + _vivliostyle_, with local JS and Chrome-based browser for rendering |
+| `vivlio-docker` | yes | As `vivlio`, but contained in _Docker_ for isolation, and _Puppeteer_ for rendering |
+| `pandoc-pagedjs` | yes | _Pandoc_ + _PagedJS_, and rendered with _Puppeteer_ |
+| `pandoc-xslt` | yes | _Pandoc_ to _DocBook 5_, then _XSLT_ and _Apache Fop_ (_XSL-FO_) (deprecated) |
 
 **`vivlio`** is the default and runs on your own machine, so it renders with
 your own fonts — which is why it is the default rather than the containerised
 one. It uses _[markdown-it](https://github.com/markdown-it/markdown-it)_,
 _[Vivliostyle](https://vivliostyle.org/)_,
 _[Mustache](https://mustache.github.io/)_ and
-_[Puppeteer](https://pptr.dev/)_, on [bun](https://bun.sh) or any node or deno
-you already have, driving a Chromium-based browser.
+_[Puppeteer](https://pptr.dev/)_, on _[bun](https://bun.sh)_ or any _node_ or _deno_
+you already have, driving a _Chromium_-based browser.
 
 **`vivlio-docker`** is the same pipeline in a container: nothing installed on
 the host, no runtime, no browser, no dependencies. The trade is fonts — a

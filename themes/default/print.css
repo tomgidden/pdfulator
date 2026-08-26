@@ -22,19 +22,13 @@ body {
   color: #000;
   background: #fff;
   margin: 0;
-  /* Left-aligned rather than justified: justification without hyphenation
-   * gives rivers, and hyphenation dictionaries are a per-language asset this
-   * theme deliberately does not carry. */
   text-align: left;
 }
 
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--pdfulator-heading);
   line-height: 1.2;
-  /* Headings keep their block with the text that follows; a heading alone at
-   * the foot of a page is the most common paginated-output complaint. */
   break-after: avoid-page;
-  page-break-after: avoid;
 }
 
 h1 { font-size: 2em;    margin: 0 0 0.6em; }
@@ -45,7 +39,6 @@ h5, h6 { font-size: 1em; margin: 1.2em 0 0.4em; }
 
 p {
   margin: 0 0 0.7em;
-  /* Two lines is the usual minimum for a widow or an orphan. */
   orphans: 2;
   widows: 2;
 }
@@ -56,8 +49,6 @@ code, pre, kbd, samp {
 }
 
 pre {
-  /* A code block that runs off the page is worse than one that wraps: the
-   * text is simply gone, and nothing on the page says so. */
   white-space: pre-wrap;
   overflow-wrap: break-word;
   margin: 0 0 0.8em;
@@ -94,8 +85,6 @@ th {
 }
 
 img {
-  /* An image wider than the text column silently overflows the page in a
-   * paginating renderer rather than scrolling, as it would on screen. */
   max-width: 100%;
   height: auto;
 }
@@ -109,4 +98,23 @@ hr {
   border: 0;
   border-top: 1px solid #999;
   margin: 1.2em 0;
+}
+
+.page-header-left,
+.page-header-right,
+.page-footer-left,
+.page-footer-right {
+  display: none;
+}
+
+.author-affiliation::before {
+  content: ', ';
+}
+
+.author-email::before {
+  content: ' <';
+}
+
+.author-email::after {
+  content: '>';
 }
