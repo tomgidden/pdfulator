@@ -4,6 +4,17 @@ variable "DEFAULT_TAG" {
   default = "pdfulator:local"
 }
 
+// The engine this invocation builds -- one per bake call, since each engine
+// has its own Dockerfile and its own tag set. Read from the environment, which
+// is how bake takes a `variable`.
+//
+// Tags are deliberately not set here: docker-metadata-action computes them and
+// hands them over through the generated bake-meta.json, so engine.conf's
+// `image=` key stays the one place an image is named.
+variable "ENGINE" {
+  default = "vivlio-docker"
+}
+
 // Special target: https://github.com/docker/metadata-action#bake-definition
 target "docker-metadata-action" {
   tags = ["${DEFAULT_TAG}"]
@@ -14,24 +25,19 @@ group "default" {
   targets = ["image-local"]
 }
 
-// The Dockerfile moved into the engine that owns it (engines/vivlio-docker),
-// so it must be named explicitly -- the default ./Dockerfile no longer exists.
-// The context stays the repository root: the image needs the vivlio engine's
-// main.js and lockfile plus the shared defaults/ and theme/, which live above
-// the engine directory.
-//
-// Still a single target. Step 9 of the modular plan generalises this into a
-// matrix over the container engines, tagging :<engine> per image; until then
-// this builds the one that exists.
+// The Dockerfile lives in the engine that owns it, so it is named explicitly:
+// there is no ./Dockerfile any more. The context stays the repository root --
+// an image needs the engine's own sources plus the shared themes/, which live
+// above the engine directory.
 target "image" {
-  inherits = ["docker-metadata-action"]
+  inherits   = ["docker-metadata-action"]
   context    = "."
-  dockerfile = "engines/vivlio-docker/Dockerfile"
+  dockerfile = "engines/${ENGINE}/Dockerfile"
 }
 
 target "image-local" {
   inherits = ["image"]
-  output = ["type=docker"]
+  output   = ["type=docker"]
 }
 
 target "image-all" {
