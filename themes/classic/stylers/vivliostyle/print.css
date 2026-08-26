@@ -1,50 +1,26 @@
-/* ==========================================================================
-   themes/classic — vivliostyle
-   ==========================================================================
-
-   The stylesheet pdfulator shipped as defaults/print.css, moved here
-   unchanged apart from two things.
-
-   The @font-face block is gone: fonts.css now generates it from fonts.conf,
-   and a hand-written copy would be a second place for the font list to drift.
-
-   And the three font-family declarations name roles rather than families --
-   var(--pdfulator-body) instead of var(--pdfulator-body). Same fonts, but a
-   theme extending this one can change them without touching any CSS.
-
-   Vivliostyle's DOM differs from Paged.js's, which is why this lives under
-   stylers/ -- see stylers/pagedjs/print.css for the same look, wired to the
-   other renderer's page model.
-   ========================================================================== */
-
-/* --------------------------------------------------------------------------
-   Design tokens
-   -------------------------------------------------------------------------- */
-
 html {
-  --S:      12pt;
-  --S0-85:  10pt;
-  --S1-25:  15pt;
-  --S1-5:   18pt;
-  --S1-75:  21pt;
-  --S2:     24pt;
+  --S: 12pt;
+  --S0-85: 10pt;
+  --S1-25: 15pt;
+  --S1-5: 18pt;
+  --S1-75: 21pt;
+  --S2: 24pt;
 
-  --L:      18pt;
-  --L0-5:   9pt;
-  --L1-5:   27pt;
-  --L2:     36pt;
-  --L3:     54pt;
-  --LL:     calc(-1 * var(--L));
+  --L: 18pt;
+  --L0-5: 9pt;
+  --L1-5: 27pt;
+  --L2: 36pt;
+  --L3: 54pt;
+  --LL: calc(-1 * var(--L));
 
-  --I:      1in;
-  --II:     calc(-1 * var(--I));
+  --I: 1in;
+  --II: calc(-1 * var(--I));
 
   --shade-monospace-color: #f7f7f7;
 }
 
-/* --------------------------------------------------------------------------
-   Page layout
-   -------------------------------------------------------------------------- */
+
+/* Page layout */
 
 @page {
   size: A4;
@@ -64,15 +40,12 @@ html {
     font-family: var(--pdfulator-heading);
     font-weight: 600;
     font-size: var(--S0-85);
-    content: counter(page);
+    content: string(footerRight) counter(page);
   }
 }
 
-/* --------------------------------------------------------------------------
-   Running footer strings
-   The doc title is always the baseline footer string, set from .doc-title.
-   feature classes on <body> can override to track headings instead.
-   -------------------------------------------------------------------------- */
+
+/* Running footer strings */
 
 /* Baseline: always track the document title */
 .doc-title {
@@ -104,21 +77,21 @@ body.footer-h4 main h4 {
   string-set: footerLeft content();
 }
 
-/* #pageFooterLeft sets footerLeft as the initial value before <main> content.
+/* .page-footer-left sets footerLeft as the initial value before <main> content.
    Heading string-set rules in main will override it page-by-page as they flow. */
-#pageFooterLeft {
+.page-footer-left {
   string-set: footerLeft content();
 }
 
 /* Hide footer source elements from normal flow */
-#pageFooterLeft,
-#pageFooterRight {
+.page-header-left,
+.page-header-right,
+.page-footer-left,
+.page-footer-right {
   display: none;
 }
 
-/* --------------------------------------------------------------------------
-   Base typography
-   -------------------------------------------------------------------------- */
+/* Base typography */
 
 body {
   font-family: var(--pdfulator-body);
@@ -160,23 +133,51 @@ h5+h6 {
   margin-top: 0;
 }
 
-h1 { font-size: var(--S1-75); line-height: var(--L2); font-weight: 800; }
-h2 { font-size: var(--S1-75); line-height: var(--L2); font-weight: 600; }
-h3 { font-size: var(--S1-5);  line-height: var(--L2); font-weight: 600; }
-h4 { font-size: var(--S1-25); line-height: var(--L2); font-weight: 600; }
-h5 { font-size: var(--S);     line-height: var(--L);  font-weight: 600; }
-h6 { font-size: var(--S);     line-height: var(--L);  font-weight: 500; }
+h1 {
+  font-size: var(--S1-75);
+  line-height: var(--L2);
+  font-weight: 800;
+}
 
-/* --------------------------------------------------------------------------
-   Document header (hgroup)
-   -------------------------------------------------------------------------- */
+h2 {
+  font-size: var(--S1-75);
+  line-height: var(--L2);
+  font-weight: 600;
+}
 
-article > hgroup {
+h3 {
+  font-size: var(--S1-5);
+  line-height: var(--L2);
+  font-weight: 600;
+}
+
+h4 {
+  font-size: var(--S1-25);
+  line-height: var(--L2);
+  font-weight: 600;
+}
+
+h5 {
+  font-size: var(--S);
+  line-height: var(--L);
+  font-weight: 600;
+}
+
+h6 {
+  font-size: var(--S);
+  line-height: var(--L);
+  font-weight: 500;
+}
+
+
+/* Document header (hgroup) */
+
+article>hgroup {
   line-height: var(--L);
   margin-bottom: var(--L2);
 }
 
-article > hgroup > .doc-title {
+article>hgroup>.doc-title {
   font-family: var(--pdfulator-heading);
   font-size: var(--S1-75);
   line-height: var(--L2);
@@ -196,9 +197,17 @@ article > hgroup > .doc-title {
   margin-top: var(--L0-5);
 }
 
-.author-affiliation::before { content: ', '; }
-.author-email::before       { content: ' <'; }
-.author-email::after        { content: '>'; }
+.author-affiliation::before {
+  content: ', ';
+}
+
+.author-email::before {
+  content: ' <';
+}
+
+.author-email::after {
+  content: '>';
+}
 
 .doc-project,
 .doc-date,
@@ -207,9 +216,8 @@ article > hgroup > .doc-title {
   margin-top: var(--L0-5);
 }
 
-/* --------------------------------------------------------------------------
-   Page layout — indented body with outdented headings
-   -------------------------------------------------------------------------- */
+
+/* Page layout — indented body with outdented headings */
 
 main {
   margin-left: var(--I);
@@ -235,9 +243,8 @@ body.wide main h6 {
   margin-left: 0;
 }
 
-/* --------------------------------------------------------------------------
-   Body content
-   -------------------------------------------------------------------------- */
+
+/* Body content */
 
 p, ul, ol, dl, pre, blockquote {
   margin: 0;
@@ -247,10 +254,13 @@ p, ul, ol, dl, pre, blockquote {
 
 p+p,
 p+blockquote, blockquote+p,
-p+dl,         dl+p,
-p+pre,        pre+p,
-dl+dl,        dl+blockquote, dl+pre,
-pre+pre,      pre+blockquote,
+p+dl, dl+p,
+p+pre, pre+p,
+dl+dl,
+dl+blockquote,
+dl+pre,
+pre+pre,
+pre+blockquote,
 blockquote+blockquote {
   margin-top: var(--L);
 }
@@ -267,28 +277,36 @@ body.strong_href main a {
   color: black;
 }
 
-a       { color: black; text-decoration: none; }
-a:visited { color: black; }
+a {
+  color: black;
+  text-decoration: none;
+}
 
-/* --------------------------------------------------------------------------
-   Lists
-   -------------------------------------------------------------------------- */
+a:visited {
+  color: black;
+}
 
-ol > li,
-ul > li {
+
+/* Lists */
+
+ol>li,
+ul>li {
   margin-left: var(--L2);
   list-style-type: square;
 }
 
-ol > li:has(p),
-ul > li:has(p) {
+ol>li:has(p),
+ul>li:has(p) {
   margin-bottom: var(--L);
 }
 
-ol + p, ul + p { margin-top: var(--L); }
+ol+p,
+ul+p {
+  margin-top: var(--L);
+}
 
-li > ol > li,
-li > ul > li {
+li>ol>li,
+li>ul>li {
   list-style-type: circle;
 }
 
@@ -312,9 +330,8 @@ dd {
   margin-left: var(--L2);
 }
 
-/* --------------------------------------------------------------------------
-   Code and preformatted text
-   -------------------------------------------------------------------------- */
+
+/* Code and preformatted text */
 
 pre, code {
   font-family: var(--pdfulator-mono);
@@ -379,9 +396,7 @@ body.shade_code pre code {
   border-radius: 0;
 }
 
-/* --------------------------------------------------------------------------
-   Blockquotes
-   -------------------------------------------------------------------------- */
+/* Blockquotes */
 
 blockquote {
   padding-left: var(--L2);
@@ -389,9 +404,7 @@ blockquote {
   font-style: italic;
 }
 
-/* --------------------------------------------------------------------------
-   Tables
-   -------------------------------------------------------------------------- */
+/* Tables */
 
 table {
   margin: var(--L) 0;
@@ -418,12 +431,16 @@ td {
   padding: 0.125rem 0.5rem 0.25rem;
 }
 
-/* --------------------------------------------------------------------------
-   Images and figures
-   -------------------------------------------------------------------------- */
+/* Images and figures */
 
-img { max-width: 100%; }
-svg { height: auto; max-width: 100%; }
+img {
+  max-width: 100%;
+}
+
+svg {
+  height: auto;
+  max-width: 100%;
+}
 
 figure {
   margin: var(--L) 0;
@@ -436,9 +453,7 @@ figcaption {
   margin-top: var(--L0-5);
 }
 
-/* --------------------------------------------------------------------------
-   Miscellaneous
-   -------------------------------------------------------------------------- */
+/* Miscellaneous */
 
 hr {
   background-color: #1a1a1a;
@@ -447,7 +462,9 @@ hr {
   margin: var(--L) 0;
 }
 
-span.smallcaps { font-variant: small-caps; }
+span.smallcaps {
+  font-variant: small-caps;
+}
 
 div.columns {
   display: flex;
@@ -464,25 +481,24 @@ div.hanging-indent {
   text-indent: -1.5rem;
 }
 
-/* --------------------------------------------------------------------------
-   Paged media — breaks and pagination
-   -------------------------------------------------------------------------- */
+/* Paged media — breaks and pagination */
 
 @media print {
+
   p, h2, h3, h4 {
     orphans: 3;
     widows: 3;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    page-break-after: avoid;
+    break-after: avoid;
   }
 
   pre, blockquote {
-    page-break-inside: avoid;
+    break-inside: avoid;
   }
 
-  tr, img {
-    page-break-inside: avoid;
+  table, tr, img {
+    break-inside: avoid;
   }
 }
