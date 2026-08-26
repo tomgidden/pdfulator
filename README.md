@@ -267,7 +267,23 @@ make test-lib         # the shell suites: no browser, no Docker, ~90s
 make test             # ...and the ones needing a browser or a tarball
 make dist             # produces ./pdfulator.tar.gz, what CI publishes
 make install-local    # ...and installs it, exactly as install.sh would
+make install-source   # installs the working tree directly, skipping the tarball
 ```
+
+`install-local` is the faithful one: it installs the exact bytes a release
+would ship, which is what you want before cutting one. `install-source` skips
+the packing step for when that is what's in the way — editing a file in `lib/`
+and wanting the installed command to have it, or bisecting. It goes through
+`install.sh` either way, so both produce the same tree, manifest and all, and
+`--uninstall` works afterwards regardless of which you used. Directly:
+
+```zsh
+PDFULATOR_SOURCE=/path/to/checkout sh install.sh
+```
+
+A source install takes its version from `git describe`, `-dirty` suffix
+included — which is what stops `--update` from offering to replace a work in
+progress with a release.
 
 `make test-lib` is the one to run while working. It is a few hundred
 assertions over the job planner, theme resolution, the font cascade, engine

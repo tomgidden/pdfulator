@@ -14,6 +14,7 @@
 #   PDFULATOR_VERSION  a release tag, or "latest" (default)
 #   PDFULATOR_REPO     owner/repo to fetch from
 #   PDFULATOR_TARBALL  install this local file instead of downloading
+#   PDFULATOR_SOURCE   install straight from this checkout, no tarball at all
 #   PDFULATOR_RELEASE_BASE  release URL root, if not GitHub's
 #
 # Options (also accepted when piped: `... | sh -s -- --install-runtime`):
@@ -83,11 +84,21 @@ fetch_stdout() {
 	fi
 }
 
-command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || {
-	echo "pdfulator: need curl or wget to download." >&2
-	exit 1
-}
-command -v tar >/dev/null 2>&1 || { echo "pdfulator: need tar." >&2; exit 1; }
+# A downloader is needed only if something is actually going to be downloaded.
+# PDFULATOR_SOURCE copies a directory and PDFULATOR_TARBALL reads a local file;
+# demanding curl for either turned "no network required" into a hard failure on
+# a machine that had no network tools precisely because it needed none.
+if [ -z "${PDFULATOR_SOURCE:-}" ] && [ -z "${PDFULATOR_TARBALL:-}" ]; then
+	command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || {
+		echo "pdfulator: need curl or wget to download." >&2
+		exit 1
+	}
+fi
+
+# Likewise tar: a source install unpacks nothing.
+if [ -z "${PDFULATOR_SOURCE:-}" ]; then
+	command -v tar >/dev/null 2>&1 || { echo "pdfulator: need tar." >&2; exit 1; }
+fi
 
 hash_file() {
 	if command -v sha256sum >/dev/null 2>&1; then
@@ -105,7 +116,57 @@ echo "Installing pdfulator to $PDFULATOR_HOME..." >&2
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-if [ -n "${PDFULATOR_TARBALL:-}" ]; then
+# Unpack to one side, then swap into place, so an interrupted download can't
+# leave a half-installed tree that looks complete.
+staging="$tmp/root"
+mkdir -p "$staging"
+
+if [ -n "${PDFULATOR_SOURCE:-}" ]; then
+	# A git checkout, copied rather than packed. `make install-local` builds a
+	# tarball first so that what it installs is byte-for-byte what a release
+	# would be; this path skips that deliberately, for the case where the
+	# tarball is the thing in the way -- a bisect, a one-line change, a machine
+	# with no make. It stages the same layout `make dist` does, so everything
+	# downstream of here cannot tell the two apart.
+	src=$PDFULATOR_SOURCE
+	[ -d "$src" ] || {
+		echo "pdfulator: no such directory: $src" >&2
+		exit 1
+	}
+	[ -f "$src/pdfulator.sh" ] && [ -d "$src/lib" ] || {
+		echo "pdfulator: $src is not a pdfulator checkout" >&2
+		echo "(expected pdfulator.sh and lib/ in it)" >&2
+		exit 1
+	}
+	echo "  copying from $src" >&2
+
+	for _top in themes lib engines; do
+		[ -d "$src/$_top" ] || continue
+		cp -R "$src/$_top" "$staging/"
+	done
+
+	# node_modules is as platform-specific here as it is in a release, and the
+	# wrapper reinstalls from the lockfile when it's absent. Copying a
+	# checkout's tree would hand the installation the developer's arch.
+	find "$staging" -name node_modules -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
+	# The wrapper is `pdfulator.sh` in a checkout and `pdfulator` once
+	# installed; the tarball does this rename too, and the manifest, the PATH
+	# copy and --uninstall all expect the installed name.
+	cp "$src/pdfulator.sh" "$staging/pdfulator"
+	cp "$src/install.sh" "$staging/install.sh"
+	chmod +x "$staging/pdfulator" "$staging/install.sh"
+
+	# What --version reports and --update compares against. A checkout has no
+	# release tag of its own, so ask git the same question the GNUmakefile
+	# does -- including the -dirty suffix, which is what stops --update from
+	# offering to replace a work in progress with a release.
+	_ver=$(cd "$src" && git describe --tags --always --dirty 2>/dev/null) || _ver=""
+	[ -n "$_ver" ] || _ver="source"
+	echo "$_ver" > "$staging/VERSION"
+	echo "  version $_ver" >&2
+
+elif [ -n "${PDFULATOR_TARBALL:-}" ]; then
 	# Local file (a checkout's `make install-local`). Nothing came off the
 	# network, so there is nothing to verify against.
 	[ -f "$PDFULATOR_TARBALL" ] || {
@@ -160,11 +221,8 @@ fi
 
 # Unpack
 
-# Unpack to one side, then swap into place, so an interrupted download can't
-# leave a half-installed tree that looks complete.
-staging="$tmp/root"
-mkdir -p "$staging"
-tar xzf "$tmp/pdfulator.tar.gz" -C "$staging"
+# PDFULATOR_SOURCE staged itself above; the other two arrive as an archive.
+[ -n "${PDFULATOR_SOURCE:-}" ] || tar xzf "$tmp/pdfulator.tar.gz" -C "$staging"
 
 # What makes an archive look right is the common layer and at least one
 # engine. It used to be pdfulator.js, back when there was exactly one converter

@@ -148,6 +148,13 @@ $(DIST).sha256: $(DIST)
 install-local: $(DIST) $(DIST).sha256
 	PDFULATOR_TARBALL=$(abspath $(DIST)) ./install.sh
 
+# Install straight from the working tree, without building a tarball at all.
+# install-local is the faithful one -- it installs exactly the bytes a release
+# would ship. This is the fast one, for when the packing step is what's in the
+# way: editing a lib/ file and wanting the installed command to have it.
+install-source:
+	PDFULATOR_SOURCE=$(CURDIR) ./install.sh
+
 # The common layer's matrices: POSIX sh, no browser, no runtime, no tarball, a
 # second or two all told. Run with `sh` rather than `bash` deliberately -- they
 # test code that ships to whatever /bin/sh a user has, and this project once
@@ -157,6 +164,7 @@ test-lib:
 	sh tests/themematrix.sh
 	sh tests/fontmatrix.sh
 	sh tests/stagematrix.sh
+	sh tests/sourcematrix.sh
 	sh tests/browsermatrix.sh
 	sh tests/watchmatrix.sh
 	sh tests/enginematrix.sh
@@ -177,5 +185,5 @@ test: test-lib $(DIST)
 clean:
 	rm -rf .dist .version $(DIST) $(DIST).sha256
 
-.PHONY: all watch docker-watch build build-all release dist install-local test test-lib clean
+.PHONY: all watch docker-watch build build-all release dist install-local install-source test test-lib clean
 
