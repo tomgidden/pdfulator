@@ -163,6 +163,7 @@ test-lib:
 	sh tests/planmatrix.sh
 	sh tests/themematrix.sh
 	sh tests/templatematrix.sh
+	sh tests/stylingmatrix.sh
 	sh tests/fontmatrix.sh
 	sh tests/stagematrix.sh
 	sh tests/sourcematrix.sh

@@ -390,7 +390,39 @@ can hold CSS for a particular one under `stylers/<styler>/` — `vivliostyle`,
 `pagedjs` or `xsl-fo`. `stylers/` rather than per-engine because `vivlio` and
 `vivlio-docker` are the same renderer and would otherwise need two identical
 copies. `engines/<id>/` is there for the rarer case of a genuine
-engine-specific difference, and wins over both.
+engine-specific difference.
+
+**The order.** Stylesheets are concatenated, and later wins. Each *axis* is
+resolved across the whole inheritance chain before the next axis begins:
+
+```
+the template's own styling            (lowest — it knows its DOM)
+grandparent, parent, theme            print.css
+grandparent, parent, theme            engines/<id>/print.css
+grandparent, parent, theme            stylers/<styler>/print.css
+the document's YAML front matter      (not yet read by any engine)
+--css on the command line             (highest)
+```
+
+Axis first, chain second, because a theme's `engines/<id>/print.css` is really
+its parent's with changes — that inheritance is private to the axis. Ordering
+it the other way round lets a *grandparent's* engine-specific rule beat the
+plain rule the theme in front of you just wrote.
+
+**Naming stylesheets.** A theme normally just contains `print.css` and needs to
+say nothing. To use a different file, or several, name them in `theme.conf`:
+
+```
+template.styling = ./base.css       # replaces what the parents contributed
+template.styling = +./extra.css     # adds to it
+```
+
+A leading `+` adds; without it the value replaces everything that level had so
+far, so a child theme can reject a parent's stylesheet outright rather than
+only ever adding to it. Naming anything means `print.css` is no longer picked
+up automatically for that theme — list it too if you want both. The same key
+works in `theme-engine.conf` and `theme-styler.conf`, contributing to those
+axes instead.
 
 ### Logo
 
