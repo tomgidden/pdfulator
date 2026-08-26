@@ -102,6 +102,30 @@ jobs:
       # more: with three engines in one repository, an unsuffixed tag would
       # have to mean one arbitrary engine, and silently gave whichever built
       # last.
+      #
+      # The bare `:<engine>` tag is what engine.conf's `image=` key names, so
+      # it is what an installed pdfulator pulls at run time. Something must
+      # produce it or no installed pdfulator can pull anything.
+      #
+      # It moves on any release tag, prerelease included. That is a deliberate
+      # choice for the v3 development phase: there is no stable v3 yet, so
+      # gating on one would leave `:vivlio` frozen at v2 -- or absent -- while
+      # every v3 image sat behind a version-pinned name nobody would guess.
+      # Revisit at 3.0.0: once a stable release exists, a prerelease moving the
+      # tag every user pulls is exactly what calling it a prerelease denies.
+      #
+      # Not a default-branch push, though, in either phase: that would let any
+      # untested commit become what every user pulls.
+      - name: Is this a release build?
+        id: channel
+        run: |
+          # Any v* tag. The hyphen split (v3.0.0-alpha1 vs v3.0.0) is what a
+          # stable-only gate would key on; see above for why it is not used yet.
+          case "$GITHUB_REF" in
+            refs/tags/v*) echo "release=true"  >> "$GITHUB_OUTPUT" ;;
+            *)            echo "release=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
@@ -113,7 +137,7 @@ jobs:
             latest=false
             suffix=-${{ env.ENGINE_TAG }},onlatest=true
           tags: |
-            type=raw,value=${{ env.ENGINE_TAG }},suffix=,enable={{is_default_branch}}
+            type=raw,value=${{ env.ENGINE_TAG }},suffix=,enable=${{ steps.channel.outputs.release }}
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}
@@ -439,6 +463,15 @@ jobs:
             pdfulator.tar.gz.sha256
             install.sh
           fail_on_unmatched_files: true
+          # Not inferred from the tag name: without this, v3.0.0-alpha1
+          # publishes as a full release and becomes GitHub's "Latest" -- what
+          # anyone landing on the releases page is offered first.
+          #
+          # Deliberately stricter than the Docker moving-latest tag above,
+          # which does move on prereleases for now. A pinned image pulled by
+          # name is an explicit act; the releases page is where people who have
+          # not chosen anything end up.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       # Refresh the site so /manifest lists the release we just made. This has
       # to be an explicit call: the release was created with GITHUB_TOKEN, and
