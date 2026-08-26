@@ -194,18 +194,37 @@ ok "a staged directory is produced" "yes" "$([ -n "$d" ] && echo yes || echo no)
 # mount and a remote engine receives it over a wire, so a path into the user's
 # home would be unreadable at exactly the moment it mattered.
 ok "the manifest names staged copies, not source paths" "" \
-	"$(cut -f3 "$d/styling.manifest" | grep -v '^styling/')"
+	"$(awk -F'\t' '$1=="styling"{print $4}' "$d/manifest" | grep -v '^input/')"
 ok "every manifest entry exists in the staged directory" "" \
-	"$(while IFS="$(printf '\t')" read -r l n f; do
-	     [ -f "$d/$f" ] || printf '%s ' "$f"
-	   done < "$d/styling.manifest")"
+	"$(awk -F'\t' '$1=="styling"{print $4}' "$d/manifest" | \
+	   while IFS= read -r f; do [ -f "$d/$f" ] || printf '%s ' "$f"; done)"
 ok "the manifest has one entry per stylesheet" "9" \
-	"$(wc -l < "$d/styling.manifest" | tr -d ' ')"
+	"$(awk -F'\t' '$1=="styling"' "$d/manifest" | wc -l | tr -d ' ')"
 
-# Staged names are generated rather than taken from the basename, because the
-# basenames COLLIDE by design -- nine files here are all called print.css.
-ok "colliding basenames get distinct staged names" "9" \
-	"$(cut -f3 "$d/styling.manifest" | sort -u | wc -l | tr -d ' ')"
+# The mirror is what keeps nine files called print.css apart. Flattening them
+# into one directory would need generated names, which throws away the
+# provenance that makes a staged directory readable when output looks wrong.
+ok "colliding basenames stay distinct via the mirror" "9" \
+	"$(awk -F'\t' '$1=="styling"{print $4}' "$d/manifest" | sort -u | \
+	   wc -l | tr -d ' ')"
+
+# And the mirror reflects where each file actually came from.
+ok "the mirror names the source theme and axis" "yes" \
+	"$(awk -F'\t' '$1=="styling"{print $4}' "$d/manifest" | \
+	   grep -q 'input/themes/leaf/stylers/S/' && echo yes || echo no)"
+
+# The mirror must anchor on the OUTERMOST recognised kind. A theme's engine
+# axis lives at themes/<t>/engines/<id>/, whose immediate parent is `engines`
+# -- so anchoring on the innermost match mirrors all three themes' engine
+# sheets onto input/engines/<id>/ and they overwrite each other. Nothing
+# errors; two of the three stylesheets simply vanish and the PDF is wrong.
+ok "a theme's engine axis is not mirrored as an engine" "3" \
+	"$(awk -F'\t' '$1=="styling" && $2==30 {print $4}' "$d/manifest" | \
+	   sort -u | wc -l | tr -d ' ')"
+ok "each mirrored file keeps its own content" "yes" \
+	"$(a=$(awk -F'\t' '$1=="styling"{print $4}' "$d/manifest" | \
+	       while IFS= read -r f; do head -1 "$d/$f"; done | sort -u | wc -l)
+	   [ "$(echo "$a" | tr -d ' ')" = 9 ] && echo yes || echo no)"
 
 # print.css is the concatenation for engines that just want one file, in the
 # same order as the manifest.
@@ -217,9 +236,10 @@ ok "print.css concatenates every part" "9" \
 # would pass with the concatenation reversed, which is a wrong PDF and no error.
 ok "print.css is in manifest order" "yes" \
 	"$(a=$(sed -n 's|^/\* \(.*\) \*/$|\1|p' "$d/print.css" | grep -v '^---')
-	   b=$(while IFS="$(printf '\t')" read -r l n f; do
+	   b=$(awk -F'\t' '$1=="styling"{print $4}' "$d/manifest" | \
+	       while IFS= read -r f; do
 	         sed -n 's|^/\* \(.*\) \*/$|\1|p' "$d/$f"
-	       done < "$d/styling.manifest")
+	       done)
 	   [ -n "$a" ] && [ "$a" = "$b" ] && echo yes || echo no)"
 
 # The provenance comment must name the file to go and EDIT, which is the
@@ -227,6 +247,30 @@ ok "print.css is in manifest order" "yes" \
 ok "provenance comments name the original path" "yes" \
 	"$(grep -q "/\* --- $BASE/themes/gran/print.css --- \*/" "$d/print.css" \
 	   && echo yes || echo no)"
+
+# The reason the mirror exists rather than a flat copy with generated names.
+# CSS resolves url() relative to the stylesheet, so a theme writing the most
+# ordinary rule imaginable -- background-image: url(./bg.png) -- gets a
+# dangling reference the moment its stylesheet is moved away from its assets.
+# Nothing in the pipeline reports a missing background image; it just renders
+# wrong, which is the failure mode this whole area exists to prevent.
+setup
+echo 'body { background-image: url(./bg.png); }' > "$BASE/themes/leaf/print.css"
+echo 'PNG' > "$BASE/themes/leaf/bg.png"
+d=$(stage_dir "$BASE/themes/leaf" E S)
+css=$(awk -F'\t' '$1=="styling" && $4 ~ /leaf\/print.css/ {print $4}' "$d/manifest")
+ok "a stylesheet's relative url() target is staged beside it" "yes" \
+	"$([ -n "$css" ] && [ -f "$d/$(dirname "$css")/bg.png" ] && echo yes || echo no)"
+
+# But not the whole subtree: fonts are staged by a mechanism that knows about
+# acquisition, and copying a theme wholesale would drag in its .git and every
+# source asset it was built from.
+mkdir -p "$BASE/themes/leaf/src"
+echo 'HUGE' > "$BASE/themes/leaf/src/original.ai"
+d=$(stage_dir "$BASE/themes/leaf" E S)
+ok "subdirectories beside a stylesheet are not dragged in" "no" \
+	"$([ -f "$d/input/themes/leaf/src/original.ai" ] && echo yes || echo no)"
+
 
 # Identity: a stylesheet the cascade selected is part of the key even when it
 # is not called print.css and not in a theme directory at all.
