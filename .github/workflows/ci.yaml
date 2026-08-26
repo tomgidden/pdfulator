@@ -11,6 +11,8 @@ on:
     branches:
       - "master"
       - "v2"
+      # v3's development branch, intended to become the default one.
+      - "modular"
     tags:
       - "v*"
     paths-ignore:
@@ -25,52 +27,56 @@ env:
   GHCR_SLUG: ghcr.io/${{ github.repository }}
 
 jobs:
+  # Which engines to build, and under what tags. Both are discovered from the
+  # engines themselves rather than listed here, so adding an engine directory
+  # is the whole of adding it to CI -- the same rule `make build-all` and
+  # tests/dockermatrix.sh already follow.
   prepare:
     runs-on: ubuntu-latest
 
     if: github.event_name != 'pull_request'
     outputs:
-      matrix: |
+      platforms: |
         ["linux/amd64", "linux/arm64"]
+      engines: ${{ steps.engines.outputs.engines }}
+      tags: ${{ steps.engines.outputs.tags }}
 
     steps:
-      - name: Prepare
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: |
-            ${{ env.DOCKERHUB_SLUG }}
-            ${{ env.GHCR_SLUG }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
-      #      type=ref,event=branch
-
-      - name: Rename meta bake definition file
+      # Every engine declaring needs_docker=yes, paired with the tag its
+      # engine.conf `image=` key claims. That key is what the wrapper pulls at
+      # run time, so building under any other name would produce images no
+      # installed pdfulator ever looks for.
+      - name: Discover container engines
+        id: engines
         run: |
-          mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
+          pairs=$(for conf in engines/*/engine.conf; do
+            grep -q '^needs_docker=yes' "$conf" || continue
+            id=${conf#engines/}; id=${id%/engine.conf}
+            # `image=owner/repo:tag` -> `tag`. The owner/repo half is supplied
+            # by DOCKERHUB_SLUG/GHCR_SLUG, so only the tag travels.
+            tag=$(sed -n 's/^image=//p' "$conf" | head -1 | sed 's/.*://')
+            [ -n "$tag" ] || { echo "engines/$id: image= has no tag" >&2; exit 1; }
+            printf '{"engine":"%s","tag":"%s"}\n' "$id" "$tag"
+          done | jq -cs .)
 
-      - name: Upload meta bake definition
-        uses: actions/upload-artifact@v5
-        with:
-          name: bake-meta
-          path: /tmp/bake-meta.json
-          if-no-files-found: error
-          retention-days: 1
+          [ "$pairs" != "[]" ] || { echo "no container engines found" >&2; exit 1; }
 
-  build:
+          # A flat id list, because a job matrixing engine *and* platform needs
+          # two independent dimensions -- `include:` only augments combinations
+          # that already exist, it does not multiply them.
+          echo "engines=$(echo "$pairs" | jq -c 'map(.engine)')" >> "$GITHUB_OUTPUT"
+
+          # ...and an id -> tag lookup for the jobs that need the tag too.
+          echo "tags=$(echo "$pairs" | jq -c 'map({(.engine): .tag}) | add')" >> "$GITHUB_OUTPUT"
+          echo "Building: $pairs"
+
+  # One tag set per engine. metadata-action computes a single set per run, and
+  # the sets differ per engine (`vivlio-3.0.0` vs `pandoc-xslt-3.0.0`), so this
+  # runs once per engine rather than once overall.
+  meta:
     runs-on: ubuntu-latest
 
     if: github.event_name != 'pull_request'
@@ -81,7 +87,68 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ fromJson(needs.prepare.outputs.matrix) }}
+        engine: ${{ fromJson(needs.prepare.outputs.engines) }}
+
+    env:
+      ENGINE_TAG: ${{ fromJson(needs.prepare.outputs.tags)[matrix.engine] }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # The engine id is the primary tag, and every version tag is suffixed
+      # with it. `:vivlio` is the moving latest for that engine, `:vivlio-3.0.0`
+      # a pinned one. There is deliberately no bare `:latest` or `:3.0.0` any
+      # more: with three engines in one repository, an unsuffixed tag would
+      # have to mean one arbitrary engine, and silently gave whichever built
+      # last.
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: |
+            ${{ env.DOCKERHUB_SLUG }}
+            ${{ env.GHCR_SLUG }}
+          flavor: |
+            latest=false
+            suffix=-${{ env.ENGINE_TAG }},onlatest=true
+          tags: |
+            type=raw,value=${{ env.ENGINE_TAG }},suffix=,enable={{is_default_branch}}
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Rename meta bake definition file
+        run: |
+          mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
+
+      - name: Upload meta bake definition
+        uses: actions/upload-artifact@v5
+        with:
+          name: bake-meta-${{ matrix.engine }}
+          path: /tmp/bake-meta.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # engine x platform. fail-fast stays off so one engine breaking does not
+  # cancel the others' builds -- pandoc-xslt fetching FOP from archive.apache.org
+  # is the flakiest step here and should not take vivlio down with it.
+  build:
+    runs-on: ubuntu-latest
+
+    if: github.event_name != 'pull_request'
+
+    needs:
+      - prepare
+      - meta
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.prepare.outputs.platforms) }}
+        engine: ${{ fromJson(needs.prepare.outputs.engines) }}
 
     permissions:
       contents: read
@@ -101,7 +168,7 @@ jobs:
       - name: Download meta bake definition
         uses: actions/download-artifact@v6
         with:
-          name: bake-meta
+          name: bake-meta-${{ matrix.engine }}
           path: /tmp
 
       - name: Set up QEMU
@@ -131,6 +198,11 @@ jobs:
       - name: Build
         id: bake
         uses: docker/bake-action@v7
+        env:
+          # A bake `variable` is read from the environment. `set:` would not do
+          # it -- that addresses target fields and Dockerfile ARGs, and ENGINE
+          # is neither: it chooses which Dockerfile the target points at.
+          ENGINE: ${{ matrix.engine }}
         with:
           # bake-action v7 defaults `source` to the remote git URL, which makes
           # `files` resolve inside that context rather than the local checkout.
@@ -142,11 +214,13 @@ jobs:
           targets: image
           sbom: true
           provenance: true
+          # The cache scope carries the engine as well as the platform, or
+          # three different images would evict each other from one scope.
           set: |
             *.tags=
             *.platform=${{ matrix.platform }}
-            *.cache-from=type=gha,scope=build-${{ env.PLATFORM_PAIR }}
-            *.cache-to=type=gha,scope=build-${{ env.PLATFORM_PAIR }}
+            *.cache-from=type=gha,scope=build-${{ matrix.engine }}-${{ env.PLATFORM_PAIR }}
+            *.cache-to=type=gha,scope=build-${{ matrix.engine }}-${{ env.PLATFORM_PAIR }}
             *.output=type=image,"name=${{ env.DOCKERHUB_SLUG }},${{ env.GHCR_SLUG }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
       - name: Export digest
@@ -158,18 +232,26 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v5
         with:
-          name: digests-${{ env.PLATFORM_PAIR }}
+          name: digests-${{ matrix.engine }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
 
+  # Per engine: each has its own manifest list, its own tags and its own
+  # attestation subject, so this cannot be one job over all the digests.
   merge:
     runs-on: ubuntu-latest
 
     if: github.event_name != 'pull_request'
 
     needs:
+      - prepare
       - build
+
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: ${{ fromJson(needs.prepare.outputs.engines) }}
 
     permissions:
       contents: read
@@ -181,14 +263,16 @@ jobs:
       - name: Download meta bake definition
         uses: actions/download-artifact@v6
         with:
-          name: bake-meta
+          name: bake-meta-${{ matrix.engine }}
           path: /tmp
 
+      # This engine's digests only -- every platform of it, and nothing from
+      # the other engines, which are being merged by their own copy of this job.
       - name: Download digests
         uses: actions/download-artifact@v6
         with:
           path: /tmp/digests
-          pattern: digests-*
+          pattern: digests-${{ matrix.engine }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -291,8 +375,16 @@ jobs:
 
       # The lockfile ships inside the tarball, so it has to be the one we
       # actually resolved -- a stale lockfile would break every install.
-      - name: Verify lockfile is current
-        run: bun install --frozen-lockfile
+      #
+      # Per engine, not at the repository root: v3 has no root package.json.
+      # A JS engine carries its own, because a `pandoc-xslt` user never meets
+      # bun and should not be made to install its dependencies.
+      - name: Verify lockfiles are current
+        run: |
+          for pkg in engines/*/package.json; do
+            echo "==> ${pkg%/package.json}"
+            ( cd "$(dirname "$pkg")" && bun install --frozen-lockfile )
+          done
 
       # VERSION goes into the tarball, and is what `--update` compares against.
       # It must be the tag, not `git describe`: a checkout at a tag would
@@ -367,11 +459,16 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          PAGES_REF: ${{ vars.PAGES_REF || 'v2' }}
         run: |
           before=$(curl -fsSL https://pdfulator.app/manifest 2>/dev/null |
                    sed -n 's/^# newest first; generated //p')
 
-          if ! gh workflow run pages.yaml --repo "$GITHUB_REPOSITORY" --ref v2; then
+          # --ref names the branch pages.yaml is read and built from, so it
+          # must track wherever the site content lives -- not the tag being
+          # released, which has no pages.yaml trigger of its own.
+          if ! gh workflow run pages.yaml --repo "$GITHUB_REPOSITORY" \
+                 --ref "$PAGES_REF"; then
             {
               echo "### ⚠️ Site rebuild could not be dispatched"
               echo ""

@@ -171,6 +171,7 @@ test-lib:
 	sh tests/dockermatrix.sh
 	sh tests/pandocmatrix.sh
 	sh tests/xsltmatrix.sh
+	sh tests/cimatrix.sh
 
 # Argument-handling matrices. These need a CHROME_PATH (or a pinned browser);
 # wrapmatrix additionally needs the tarball, since it installs what it tests.
