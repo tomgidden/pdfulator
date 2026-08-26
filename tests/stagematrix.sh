@@ -15,6 +15,7 @@ LIB=$(cd "$(dirname "$0")/../lib" && pwd)
 . "$LIB/paths.sh"
 . "$LIB/theme.sh"
 . "$LIB/template.sh"
+. "$LIB/styling.sh"
 . "$LIB/fonts.sh"
 . "$LIB/stage.sh"
 

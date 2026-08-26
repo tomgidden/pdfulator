@@ -44,7 +44,13 @@ STAGE_FILES="metadata.lua theme.yaml fo.xsl \
 # Files that *are* a cascade: concatenated root-first, so a child's rules come
 # after -- and therefore win -- by ordinary CSS precedence rather than by
 # replacing the file.
-STAGE_CASCADE="print.css html.css"
+#
+# print.css is no longer here: which stylesheets apply, and in what order, is
+# now lib/styling.sh's question, and it answers it with (level, file) tuples
+# that stage_styling turns into this same concatenation. html.css stays because
+# nothing generates or declares it -- it is a plain by-name cascade file, and
+# the only one left.
+STAGE_CASCADE="html.css"
 
 
 stage_error() {  # stage_error <message>
@@ -97,6 +103,19 @@ stage_key() {  # stage_key <chain> <engine> <styler> [css]
 				fi
 			done
 		fi
+		# Every stylesheet the cascade selects, in order, with its content. The
+		# by-name loop below cannot stand in for this: a theme may now name a
+		# stylesheet that is not called print.css and does not sit in a theme
+		# directory at all -- the template's own styling is the shipped example
+		# -- so a file the result depends on would otherwise be outside the key.
+		styling_list "$1" "$2" "$3" \
+			"${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$2" "${4:-}" 2>/dev/null | \
+		while IFS="$(printf '\t')" read -r _sk_lvl _sk_f || [ -n "$_sk_lvl" ]; do
+			[ -n "$_sk_f" ] || continue
+			[ -f "$_sk_f" ] || continue
+			printf '%s %s %s\n' "$_sk_lvl" "$_sk_f" "$(conf_hash_file "$_sk_f")"
+		done
+
 		printf '%s\n' "$1" | while IFS= read -r _sk_dir || [ -n "$_sk_dir" ]; do
 			[ -n "$_sk_dir" ] || continue
 			printf '%s\n' "$_sk_dir"
@@ -154,21 +173,14 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 			cat -- "$_sb_src" >> "$_sb_out/$_sb_name" || return 1
 			printf '\n' >> "$_sb_out/$_sb_name"
 		done
-
-		# --css last of all, so it wins over every theme in the chain. Appended
-		# to print.css rather than passed separately, so that "later wins" is
-		# one rule the whole way down instead of two.
-		if [ "$_sb_name" = "print.css" ] && [ -n "$_sb_css" ]; then
-			if [ ! -f "$_sb_css" ]; then
-				stage_error "no such stylesheet: $_sb_css"
-				return 1
-			fi
-			printf '/* --- %s (--css) --- */\n' "$_sb_css" \
-				>> "$_sb_out/$_sb_name"
-			cat -- "$_sb_css" >> "$_sb_out/$_sb_name" || return 1
-			printf '\n' >> "$_sb_out/$_sb_name"
-		fi
 	done
+
+	# --- The styling cascade -------------------------------------------------
+	#
+	# print.css and its manifest. --css arrives here as the highest level
+	# rather than as a special case appended afterwards.
+	stage_styling "$_sb_chain" "$_sb_engine" "$_sb_styler" "$_sb_out" \
+		"$_sb_css" || return 1
 
 	# --- Single files: most specific wins ---------------------------------------
 	for _sb_name in $STAGE_FILES; do
@@ -331,6 +343,80 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 		cp -- "$_stt_sup" "$_stt_out/$(basename -- "$_stt_sup")" || exit 1
 	done || return 1
 
+	return 0
+}
+
+
+# Stage the styling cascade.
+#
+#   stage_styling <chain> <engine> <styler> <staged-dir> [css]
+#
+# Writes two things:
+#
+#   print.css           every stylesheet, in level order, concatenated
+#   styling.manifest    <level-number> <level-name> <staged-name>, one per line
+#
+# Both, not either, and the reason is the split the design turns on. The
+# manifest is the (level, file) tuples the engine reconciles: a CSS engine can
+# take print.css and be done, while an engine that is not additive -- XSL-FO
+# especially -- reads the manifest and flattens the same set its own way. An
+# engine that wants to splice its own band in (the document's YAML, level 50,
+# which the wrapper cannot produce) needs the parts, not the concatenation.
+#
+# The files are COPIED into the staged directory and the manifest names those
+# copies, never the originals. A staged directory has to be self-contained: a
+# container engine sees it through a mount and a remote engine receives it over
+# a wire, and neither can open /Users/someone/themes/classic/print.css. This is
+# the same reason fonts are copied rather than referenced.
+#
+# Staged names are generated, not taken from the source basename, because the
+# basenames collide by design -- themes/classic alone has two files called
+# print.css (one per styler), and a two-level chain has more. Numbering them by
+# position keeps the manifest's order visible in a directory listing.
+stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
+	_sy_chain=$1
+	_sy_engine=$2
+	_sy_styler=$3
+	_sy_out=$4
+	_sy_css=${5:-}
+
+	_sy_enginedir="${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$_sy_engine"
+
+	_sy_list="$_sy_out/.styling.list"
+	styling_list "$_sy_chain" "$_sy_engine" "$_sy_styler" "$_sy_enginedir" \
+		"$_sy_css" > "$_sy_list" || { rm -f "$_sy_list"; return 1; }
+
+	mkdir -p -- "$_sy_out/styling" || return 1
+	: > "$_sy_out/styling.manifest" || return 1
+	: > "$_sy_out/print.css" || return 1
+
+	_sy_n=0
+	while IFS="$(printf '\t')" read -r _sy_level _sy_file || [ -n "$_sy_level" ]; do
+		[ -n "$_sy_file" ] || continue
+		[ -f "$_sy_file" ] || continue
+
+		_sy_n=$((_sy_n + 1))
+		# Zero-padded so a plain sort of the directory matches the cascade
+		# order, and suffixed with the level's name so the listing says what
+		# each part is without cross-referencing the manifest.
+		_sy_name=$(printf '%02d-%s.css' "$_sy_n" \
+			"$(styling_level_name "$_sy_level")")
+		cp -- "$_sy_file" "$_sy_out/styling/$_sy_name" || return 1
+
+		printf '%s\t%s\t%s\n' "$_sy_level" \
+			"$(styling_level_name "$_sy_level")" "styling/$_sy_name" \
+			>> "$_sy_out/styling.manifest" || return 1
+
+		# The concatenation, with the ORIGINAL path in the provenance comment.
+		# The staged copy's name says where it sits in the cascade; the comment
+		# has to say which file in the user's tree to go and edit, and after
+		# copying only this loop still knows that.
+		printf '/* --- %s --- */\n' "$_sy_file" >> "$_sy_out/print.css"
+		cat -- "$_sy_file" >> "$_sy_out/print.css" || return 1
+		printf '\n' >> "$_sy_out/print.css"
+	done < "$_sy_list"
+
+	rm -f "$_sy_list"
 	return 0
 }
 
