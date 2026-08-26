@@ -171,15 +171,29 @@ check "stdin has no sidecar" "no" \
 
 
 echo "============ THEME OVERRIDES ============"
-# A theme may replace the template and add a filter, not just the CSS. Checked
-# per run rather than baked in, since the theme is mounted at run time and the
-# image cannot know what is in it.
+# The *staged* template wins. Not "a theme's own article.tmpl wins", which is
+# what this asserted before and what was wrong: staging used to copy a file
+# called article.tmpl out of the theme chain regardless of its syntax, so
+# themes/default's Mustache template reached pandoc and its markup was printed
+# into the PDF as text. The wrapper now selects a template by ecosystem and
+# stages it under this name, so what is here is always pandoc's dialect.
+#
+# The assertion itself is unchanged in shape because the engine's rule is
+# unchanged -- prefer the staged copy -- and that rule was never the bug. What
+# changed is who is allowed to put a file here.
 fixture
-printf 'theme template\n' > "$BASE/theme/article.tmpl"
+printf 'staged template\n' > "$BASE/theme/article.tmpl"
 run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
-check "a theme template wins" "yes" \
+check "the staged template wins" "yes" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/article.tmpl")"
 check "and the engine's is not also passed" "no" \
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
+
+# A staged directory with no template at all falls back to the engine's own,
+# which is what a bare `docker run` with no mounts gets.
+fixture
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+check "no staged template falls back to the engine's" "yes" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
 
 fixture

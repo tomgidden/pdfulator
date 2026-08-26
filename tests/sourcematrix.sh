@@ -28,6 +28,9 @@ is "the install succeeds" "$?" "0"
 [ -d "$S/src/lib" ]     && ok "lib/ arrives"      || bad "lib/ arrives"
 [ -d "$S/src/engines" ] && ok "engines/ arrives"  || bad "engines/ arrives"
 [ -d "$S/src/themes" ]  && ok "themes/ arrives"   || bad "themes/ arrives"
+# templates/ is a shipped top-level directory too: without it every engine
+# silently falls back to whatever built-in template it carries.
+[ -d "$S/src/templates" ] && ok "templates/ arrives" || bad "templates/ arrives"
 
 # The wrapper is pdfulator.sh in a checkout and pdfulator once installed.
 # Everything downstream -- the manifest, the PATH copy, --uninstall -- expects
@@ -62,7 +65,8 @@ fi
 # Outside a git repository there is no describe to ask, and an empty VERSION
 # would leave --version printing nothing at all.
 mkdir -p "$S/nogit"
-cp -R "$REPO/lib" "$REPO/engines" "$REPO/themes" "$S/nogit/" 2>/dev/null
+cp -R "$REPO/lib" "$REPO/engines" "$REPO/themes" "$REPO/templates" \
+	"$S/nogit/" 2>/dev/null
 cp "$REPO/pdfulator.sh" "$REPO/install.sh" "$S/nogit/"
 PDFULATOR_HOME=$S/ng PDFULATOR_BIN=$S/ngbin PDFULATOR_SOURCE=$S/nogit \
 	sh "$REPO/install.sh" >/dev/null 2>&1
@@ -98,7 +102,7 @@ if [ -f "$REPO/pdfulator.tar.gz" ]; then
 	for f in "$REPO/install.sh" "$REPO/pdfulator.sh"; do
 		[ "$f" -nt "$REPO/pdfulator.tar.gz" ] && stale=$f
 	done
-	[ -n "$(find "$REPO/lib" "$REPO/engines" "$REPO/themes" -type f \
+	[ -n "$(find "$REPO/lib" "$REPO/engines" "$REPO/themes" "$REPO/templates" -type f \
 	          -newer "$REPO/pdfulator.tar.gz" 2>/dev/null | head -1)" ] &&
 		stale=${stale:-sources}
 fi

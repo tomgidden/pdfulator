@@ -9,7 +9,8 @@
 #   fonts/             the font files themselves
 #   fop-fonts.xconf    generated FOP font configuration    (xsl-fo stylers)
 #   fo-params          role -> family, for xsltproc        (xsl-fo stylers)
-#   article.tmpl       the most specific template in the chain
+#   article.tmpl       the selected template's structural file, under its own
+#                      name (global.tmpl for the DocBook ecosystem)
 #   metadata.lua, logo.svg, ...
 #
 # Built on this side of the container boundary, deliberately. An engine then
@@ -22,14 +23,22 @@
 
 
 # Files a theme may supply that are copied through as-is, most specific
-# winning. Not a cascade: a theme overriding article.tmpl replaces its
-# parent's, since half a template is not a template.
+# winning. Not a cascade: a theme overriding metadata.lua replaces its
+# parent's, since half a filter is not a filter.
 #
 # Several logo spellings, because a logo is the one asset people arrive with
 # already made, in whatever format they were given. Staging all of them costs
 # nothing -- a theme has at most one -- and means `logo.png` is not silently
 # ignored by a rule that only ever looked for `.svg`.
-STAGE_FILES="article.tmpl metadata.lua theme.yaml global.tmpl fo.xsl \
+#
+# `article.tmpl` and `global.tmpl` are deliberately NOT here any more. Staging
+# a template by name is what broke both pandoc engines: themes/default's
+# article.tmpl is Mustache, this list copied it in for whichever engine asked,
+# and engines/pandoc-*/render preferred the staged copy over their own -- so
+# pandoc received a template in a syntax it does not know and printed the
+# markup into the PDF as text. A template now arrives via the template object,
+# which knows which ecosystem it belongs to. See stage_template below.
+STAGE_FILES="metadata.lua theme.yaml fo.xsl \
              logo.svg logo.png logo.jpg logo.jpeg logo.webp"
 
 # Files that *are* a cascade: concatenated root-first, so a child's rules come
@@ -71,12 +80,33 @@ stage_key() {  # stage_key <chain> <engine> <styler> [css]
 		if [ -n "${4:-}" ] && [ -f "$4" ]; then
 			printf '%s %s\n' "$4" "$(conf_hash_file "$4")"
 		fi
+
+		# The template too. Its files are outside every theme in the chain, so
+		# without this an edit to a template -- or a theme changing which
+		# template it selects -- would keep serving the staged copy made before
+		# the change, which is the cache lying rather than being fast.
+		_sk_tdir=$(template_select "$1" "$2" "$3" \
+			"${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$2" 2>/dev/null) || _sk_tdir=""
+		if [ -n "$_sk_tdir" ]; then
+			printf '%s\n' "$_sk_tdir"
+			for _sk_tf in "$_sk_tdir/template.conf" \
+				"$(template_structure "$_sk_tdir" 2>/dev/null)" \
+				$(template_support "$_sk_tdir" 2>/dev/null); do
+				if [ -n "$_sk_tf" ] && [ -f "$_sk_tf" ]; then
+					printf '%s %s\n' "$_sk_tf" "$(conf_hash_file "$_sk_tf")"
+				fi
+			done
+		fi
 		printf '%s\n' "$1" | while IFS= read -r _sk_dir || [ -n "$_sk_dir" ]; do
 			[ -n "$_sk_dir" ] || continue
 			printf '%s\n' "$_sk_dir"
 			# Every file that could contribute, in a fixed order, each with its
 			# content hash. A theme that changes any of them gets a new key.
-			for _sk_name in $STAGE_FILES $STAGE_CASCADE fonts.conf theme.conf; do
+			# theme-engine.conf and theme-styler.conf are here because they may
+			# select a template; a theme changing which one it uses must get a
+			# new key even though none of its own files changed.
+			for _sk_name in $STAGE_FILES $STAGE_CASCADE fonts.conf theme.conf \
+				theme-engine.conf theme-styler.conf; do
 				for _sk_where in "$_sk_dir/engines/$2" "$_sk_dir/stylers/$3" "$_sk_dir"; do
 					if [ -f "$_sk_where/$_sk_name" ]; then
 						printf '%s %s\n' "$_sk_where/$_sk_name" \
@@ -147,6 +177,9 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 			cp -- "$_sb_src" "$_sb_out/$_sb_name" || return 1
 		fi
 	done
+
+	# --- The template ------------------------------------------------------------
+	stage_template "$_sb_chain" "$_sb_engine" "$_sb_styler" "$_sb_out" || return 1
 
 	# --- Fonts -------------------------------------------------------------------
 	#
@@ -251,6 +284,53 @@ stage_dir() {  # stage_dir <theme-dir> <engine> <styler> [font-base] [css]
 	fi
 
 	printf '%s\n' "$_sd_target"
+	return 0
+}
+
+
+# Stage the structural template.
+#
+#   stage_template <chain> <engine> <styler> <staged-dir>
+#
+# The template is selected by ecosystem rather than copied by name, which is
+# the whole point of the object: engines/pandoc-* and engines/vivlio* want a
+# file called article.tmpl, but they want *different* article.tmpls, and the
+# old by-name staging could not tell them apart.
+#
+# It is staged under the template's own basename, so the engine side is
+# unchanged -- pandoc's render still reads `article.tmpl` out of the theme
+# directory, and the XSLT one still reads `global.tmpl`. What changed is which
+# file arrives under that name.
+#
+# An engine that names no template stages nothing and falls back to its own
+# built-in, which is what the null engine does and what any future engine with
+# no template concept (remote, typst) will do.
+stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
+	_stt_chain=$1
+	_stt_engine=$2
+	_stt_styler=$3
+	_stt_out=$4
+
+	_stt_enginedir="${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$_stt_engine"
+
+	_stt_tmpl=$(template_select "$_stt_chain" "$_stt_engine" "$_stt_styler" \
+		"$_stt_enginedir") || return 1
+	[ -n "$_stt_tmpl" ] || return 0
+
+	_stt_src=$(template_structure "$_stt_tmpl") || return 1
+	[ -n "$_stt_src" ] || return 0
+
+	cp -- "$_stt_src" "$_stt_out/$(basename -- "$_stt_src")" || return 1
+
+	# Whatever the structure needs beside it. The DocBook template pulls in
+	# global.ent through a SYSTEM entity, which resolves relative to the
+	# template's own location -- so staging the template alone gives pandoc a
+	# DTD subset pointing at a file that is not there.
+	template_support "$_stt_tmpl" | while IFS= read -r _stt_sup || [ -n "$_stt_sup" ]; do
+		[ -n "$_stt_sup" ] || continue
+		cp -- "$_stt_sup" "$_stt_out/$(basename -- "$_stt_sup")" || exit 1
+	done || return 1
+
 	return 0
 }
 

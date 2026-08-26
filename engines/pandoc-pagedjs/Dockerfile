@@ -53,21 +53,28 @@ ENV CHROME_PATH=/usr/bin/chromium
 # that is already present.
 RUN npm install -g --unsafe-perm --ignore-scripts pagedjs-cli
 
-# The engine's own template and filter.
+# The engine's own filter, and the template it falls back to.
 #
 # No fonts and no stylesheet: both now come from the theme the wrapper stages
 # and mounts, which is what lets one theme dress this engine and the browser
-# ones alike. The template stays here because it is a *pandoc* template while
-# the vivlio engine's is *Mustache* -- same ancestry, different syntax, and a
-# theme supplying one supplies it under stylers/pagedjs/.
-COPY engines/pandoc-pagedjs/article.tmpl \
-     engines/pandoc-pagedjs/metadata.lua \
-     /engine/
+# ones alike.
+#
+# The template comes from templates/html-pandoc-pagedjs rather than from this
+# engine's own directory, because it is a property of the *ecosystem* -- HTML
+# filled by pandoc's $var$ syntax -- and not of this engine alone. The vivlio
+# engines' template has the same ancestry and nearly the same markup but
+# Mustache placeholders, and the two being interchangeable by filename is
+# exactly what produced a PDF with template markup printed in it.
+COPY templates/html-pandoc-pagedjs/article.tmpl /engine/article.tmpl
+COPY engines/pandoc-pagedjs/metadata.lua        /engine/metadata.lua
 
-# The built-in theme, so the image works with no mounts at all. A user theme
-# is mounted over /theme by the engine's convert.
-# The fallback theme, for a run that supplies none. Normally the wrapper
-# stages one and mounts it over this.
+# The fallback theme, for a bare `docker run` that mounts nothing. Normally the
+# wrapper stages a theme and mounts it over this.
+#
+# themes/default no longer carries a template of its own -- that moved to
+# templates/html-mustache-vivlio -- so this is stylesheets and fonts.conf only,
+# and there is no longer any way for a Mustache template to arrive here under a
+# name pandoc would read.
 COPY themes/default /theme
 
 # Where the wrapper mounts things, plus the scratch directory the conversion

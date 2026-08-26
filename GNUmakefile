@@ -90,7 +90,7 @@ release:
 # on arrival.
 
 DIST      = pdfulator.tar.gz
-DIST_TOP  = themes lib engines
+DIST_TOP  = themes templates lib engines
 # Expanded for dependency tracking only; the copy uses DIST_TOP so that
 # directories arrive as directories rather than a flattened heap of files.
 #
@@ -99,7 +99,7 @@ DIST_TOP  = themes lib engines
 # engine's own bun.lock, which does ship. (Step 5 of the modular plan splits
 # these into per-engine tarballs so a user downloads only the engines they use;
 # until then they ride along in the one tarball.)
-DIST_SRC  = $(shell find themes lib -type f) \
+DIST_SRC  = $(shell find themes templates lib -type f) \
             $(shell find engines -type f -not -path '*/node_modules/*')
 
 # What `pdfulator --version` reports and `--update` compares against. CI
@@ -162,6 +162,7 @@ install-source:
 test-lib:
 	sh tests/planmatrix.sh
 	sh tests/themematrix.sh
+	sh tests/templatematrix.sh
 	sh tests/fontmatrix.sh
 	sh tests/stagematrix.sh
 	sh tests/sourcematrix.sh
