@@ -328,6 +328,14 @@ my_theme/
   engines/pandoc-xslt/          ...or for one specific engine
 ```
 
+A stylesheet can be called anything, as long as `theme.conf` names it — see
+**Naming stylesheets** below. The shipped themes do exactly that, because a
+file called `print.css` tells you nothing about where it came from once several
+of them are concatenated: `themes/classic` ships
+`stylers/vivliostyle/classic.styler-vivliostyle.css`. Any asset a stylesheet
+refers to relatively — `url(./bg.png)` — travels with it, so relative
+references keep working.
+
 Everything is optional. A theme is data throughout — nothing in it is ever
 executed, which matters because themes are meant to be shared.
 

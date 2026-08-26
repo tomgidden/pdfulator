@@ -4,13 +4,13 @@
 # the theme the user named; it is now a directory this file builds, holding
 # everything that theme means for this particular engine:
 #
-#   print.css          the CSS cascade, concatenated root-first
+#   manifest           what is here and what each thing is (see below)
+#   input/             every input file, under a mirror of where it came from
+#   print.css          the styling cascade, concatenated in level order
 #   fonts.css          generated @font-face and --pdfulator-<role> properties
 #   fonts/             the font files themselves
 #   fop-fonts.xconf    generated FOP font configuration    (xsl-fo stylers)
 #   fo-params          role -> family, for xsltproc        (xsl-fo stylers)
-#   article.tmpl       the selected template's structural file, under its own
-#                      name (global.tmpl for the DocBook ecosystem)
 #   metadata.lua, logo.svg, ...
 #
 # Built on this side of the container boundary, deliberately. An engine then
@@ -19,7 +19,54 @@
 # what makes the same theme work for a bundled engine, a containerised one
 # (mount the directory) and eventually a remote one (send the directory).
 #
-# Requires lib/conf.sh, lib/paths.sh, lib/theme.sh and lib/fonts.sh.
+# --- THE MANIFEST ------------------------------------------------------------
+#
+# One tab-separated row per file, after a `#` comment line:
+#
+#   <kind>  <level>  <level-name>  <path>
+#
+# <kind> is what the row is for -- `styling` for a stylesheet, `structure` for
+# the template's structural file. <level> and <level-name> are set for styling
+# rows and empty otherwise. <path> is always relative to the staged directory,
+# so it survives a mount or a transfer.
+#
+# The manifest exists so that an engine is TOLD what to read rather than
+# guessing. Engines have historically hardcoded a filename -- `article.tmpl`,
+# `global.tmpl`, `print.css` -- and looked for it at the root. That is a
+# leftover from when the staged directory *was* the theme, and it is the same
+# by-name coupling that once let a Mustache template reach pandoc: staging the
+# right file under the expected name fixed that symptom but left every
+# ecosystem obliged to agree on a filename. A row in the manifest removes the
+# obligation.
+#
+# It is also the (level, file) list the styling design calls for. A CSS engine
+# can ignore it and read print.css; an engine that is not additive -- XSL-FO
+# especially -- reads the rows and flattens them its own way; an engine
+# splicing in its own band (the document's YAML, level 50, which the wrapper
+# cannot extract) needs the parts rather than the concatenation.
+#
+# --- WHY input/ MIRRORS THE SOURCE TREE --------------------------------------
+#
+# Files are not flattened into one directory, for two reasons:
+#
+#   1. Basenames collide by design. A theme chain contributes several files
+#      called print.css -- one per theme per axis. Renaming them to fit in one
+#      directory throws away the provenance that makes a staged directory
+#      readable when the output looks wrong.
+#
+#   2. CSS resolves url() relative to the stylesheet. A theme writing
+#      `background-image: url(./bg.png)` gets a dangling reference the moment
+#      its stylesheet is moved away from its assets, and a missing background
+#      image is not an error anywhere in the pipeline -- it just renders wrong.
+#
+# So `themes/classic/stylers/vivliostyle/classic.styler-vivliostyle.css`
+# arrives at `input/themes/classic/stylers/vivliostyle/...`, with the files
+# that sit beside it. Note that url() inside the concatenated print.css at the
+# root does NOT resolve into the mirror, which is a further reason for an
+# engine to prefer the manifest.
+#
+# Requires lib/conf.sh, lib/paths.sh, lib/theme.sh, lib/template.sh,
+# lib/styling.sh and lib/fonts.sh.
 
 
 # Files a theme may supply that are copied through as-is, most specific
@@ -31,8 +78,8 @@
 # nothing -- a theme has at most one -- and means `logo.png` is not silently
 # ignored by a rule that only ever looked for `.svg`.
 #
-# `article.tmpl` and `global.tmpl` are deliberately NOT here any more. Staging
-# a template by name is what broke both pandoc engines: themes/default's
+# `article.tmpl` and `global.tmpl` are deliberately NOT here. Staging a
+# template by name is what broke both pandoc engines: themes/default's
 # article.tmpl is Mustache, this list copied it in for whichever engine asked,
 # and engines/pandoc-*/render preferred the staged copy over their own -- so
 # pandoc received a template in a syntax it does not know and printed the
@@ -47,7 +94,7 @@ STAGE_FILES="metadata.lua theme.yaml fo.xsl \
 #
 # print.css is no longer here: which stylesheets apply, and in what order, is
 # now lib/styling.sh's question, and it answers it with (level, file) tuples
-# that stage_styling turns into this same concatenation. html.css stays because
+# that stage_styling turns into that same concatenation. html.css stays because
 # nothing generates or declares it -- it is a plain by-name cascade file, and
 # the only one left.
 STAGE_CASCADE="html.css"
@@ -153,6 +200,13 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 	_sb_css=${6:-}
 
 	mkdir -p -- "$_sb_out/fonts" || return 1
+
+	# The manifest describes the staged directory to whatever reads it. Written
+	# here rather than by each stager so the order of rows follows the order
+	# things are staged in, and so it exists even if nothing adds a row.
+	{
+		printf '# pdfulator staged directory. kind\tlevel\tlevel-name\tpath\n'
+	} > "$_sb_out/manifest" || return 1
 
 	# --- Cascaded files: concatenated root-first --------------------------------
 	#
@@ -332,7 +386,13 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 	_stt_src=$(template_structure "$_stt_tmpl") || return 1
 	[ -n "$_stt_src" ] || return 0
 
-	cp -- "$_stt_src" "$_stt_out/$(basename -- "$_stt_src")" || return 1
+	# Mirrored, like the stylesheets, so a template that pulls in a partial or
+	# an asset by relative path finds it -- the same reason and the same
+	# mechanism. See stage_styling.
+	_stt_rel=$(stage_mirror_path "$(dirname -- "$_stt_src")")
+	mkdir -p -- "$_stt_out/input/$_stt_rel" || return 1
+	_stt_name=$(basename -- "$_stt_src")
+	cp -- "$_stt_src" "$_stt_out/input/$_stt_rel/$_stt_name" || return 1
 
 	# Whatever the structure needs beside it. The DocBook template pulls in
 	# global.ent through a SYSTEM entity, which resolves relative to the
@@ -340,10 +400,50 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 	# DTD subset pointing at a file that is not there.
 	template_support "$_stt_tmpl" | while IFS= read -r _stt_sup || [ -n "$_stt_sup" ]; do
 		[ -n "$_stt_sup" ] || continue
-		cp -- "$_stt_sup" "$_stt_out/$(basename -- "$_stt_sup")" || exit 1
+		cp -- "$_stt_sup" "$_stt_out/input/$_stt_rel/" || exit 1
+	done || return 1
+
+	# The engine is TOLD what to read. Engines used to hardcode `article.tmpl`
+	# or `global.tmpl` and look for it at the staged root -- a leftover from
+	# when the staged directory was the theme itself. That by-name coupling is
+	# what let a Mustache template reach pandoc in the first place; staging the
+	# right file under the expected name fixed the symptom but kept the
+	# coupling, and with it the requirement that every ecosystem agree on a
+	# filename. Naming the file here removes it.
+	stage_manifest_add "$_stt_out" structure "" "" \
+		"input/$_stt_rel/$_stt_name" || return 1
+
+	# The legacy name at the root, for now. engines/vivlio/main.js and both
+	# pandoc renders still look for it, and they are updated separately; until
+	# then this keeps a staged directory readable by the engines as they stand.
+	#
+	# The support files come with it. A structural file at the root whose
+	# SYSTEM entity resolves to nothing is worse than no file at all: pandoc
+	# fails while parsing the DTD subset, before any conversion begins. That is
+	# the exact failure template.support was invented to prevent, and mirroring
+	# reintroduces it unless both copies are complete.
+	cp -- "$_stt_src" "$_stt_out/$_stt_name" || return 1
+	template_support "$_stt_tmpl" | while IFS= read -r _stt_sup || [ -n "$_stt_sup" ]; do
+		[ -n "$_stt_sup" ] || continue
+		cp -- "$_stt_sup" "$_stt_out/" || exit 1
 	done || return 1
 
 	return 0
+}
+
+
+# Append one row to the staged directory's manifest.
+#
+#   stage_manifest_add <staged-dir> <kind> <level> <level-name> <path>
+#
+# One file describing everything an engine might need to find, rather than a
+# convention per file type. <kind> says what the row is -- `styling` for a
+# stylesheet, `structure` for the template's structural file -- and <path> is
+# always relative to the staged directory, so it stays correct through a mount
+# or a transfer.
+stage_manifest_add() {  # stage_manifest_add <dir> <kind> <level> <name> <path>
+	printf '%s\t%s\t%s\t%s\n' "$2" "${3:-}" "${4:-}" "$5" \
+		>> "$1/manifest"
 }
 
 
@@ -351,28 +451,39 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 #
 #   stage_styling <chain> <engine> <styler> <staged-dir> [css]
 #
-# Writes two things:
+# Writes:
 #
-#   print.css           every stylesheet, in level order, concatenated
-#   styling.manifest    <level-number> <level-name> <staged-name>, one per line
+#   input/<kind>/<name>/...   every stylesheet, under a mirror of where it
+#                             came from, with the assets beside it
+#   manifest                  a row per file, appended to by every stager
+#   print.css                 the same files concatenated, for engines that
+#                             just want one stylesheet
 #
-# Both, not either, and the reason is the split the design turns on. The
-# manifest is the (level, file) tuples the engine reconciles: a CSS engine can
-# take print.css and be done, while an engine that is not additive -- XSL-FO
-# especially -- reads the manifest and flattens the same set its own way. An
-# engine that wants to splice its own band in (the document's YAML, level 50,
-# which the wrapper cannot produce) needs the parts, not the concatenation.
+# THE MIRROR IS WHY THIS IS NOT A FLAT COPY. Two reasons, and the second is a
+# bug that a flat copy causes rather than merely a tidiness argument:
 #
-# The files are COPIED into the staged directory and the manifest names those
-# copies, never the originals. A staged directory has to be self-contained: a
-# container engine sees it through a mount and a remote engine receives it over
-# a wire, and neither can open /Users/someone/themes/classic/print.css. This is
-# the same reason fonts are copied rather than referenced.
+#   1. Basenames collide by design. themes/classic ships two files called
+#      print.css, one per styler, and an inheritance chain has more. Renaming
+#      them to make them fit in one directory throws away the provenance that
+#      makes a staged directory readable when something looks wrong.
 #
-# Staged names are generated, not taken from the source basename, because the
-# basenames collide by design -- themes/classic alone has two files called
-# print.css (one per styler), and a two-level chain has more. Numbering them by
-# position keeps the manifest's order visible in a directory listing.
+#   2. CSS resolves url() relative to the stylesheet. A theme writing
+#      `background-image: url(./bg.png)` -- entirely ordinary CSS -- gets a
+#      dangling reference the moment its stylesheet is moved away from its
+#      assets, and a missing background image is not an error anywhere in the
+#      pipeline. It just renders wrong. Keeping each stylesheet inside a mirror
+#      of its own directory keeps every relative reference in it true.
+#
+# The mirror is keyed on <kind>/<name> -- themes/classic, templates/mustache --
+# rather than on the absolute source path, because a theme may live in the
+# working directory, in PDFULATOR_HOME, in the install tree or at an absolute
+# path the user typed, and the staged layout should not vary with which. Where
+# two directories would collide on <kind>/<name>, a counter disambiguates: it
+# is the source path that is ambiguous at that point, not the mirror.
+#
+# Everything is COPIED in, never referenced. A staged directory has to be
+# self-contained -- a container sees it through a mount and a remote engine
+# receives it over a wire, and neither can open a path into the user's home.
 stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
 	_sy_chain=$1
 	_sy_engine=$2
@@ -386,37 +497,137 @@ stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
 	styling_list "$_sy_chain" "$_sy_engine" "$_sy_styler" "$_sy_enginedir" \
 		"$_sy_css" > "$_sy_list" || { rm -f "$_sy_list"; return 1; }
 
-	mkdir -p -- "$_sy_out/styling" || return 1
-	: > "$_sy_out/styling.manifest" || return 1
+	mkdir -p -- "$_sy_out/input" || return 1
 	: > "$_sy_out/print.css" || return 1
 
+	# Which source directories have already been mirrored, so a second
+	# stylesheet from the same theme lands beside the first rather than in a
+	# second copy of it. One line per directory: "<src>\t<mirror>".
+	_sy_seen="$_sy_out/.styling.seen"
+	: > "$_sy_seen" || return 1
 	_sy_n=0
+
 	while IFS="$(printf '\t')" read -r _sy_level _sy_file || [ -n "$_sy_level" ]; do
 		[ -n "$_sy_file" ] || continue
 		[ -f "$_sy_file" ] || continue
 
+		_sy_src=$(dirname -- "$_sy_file")
+
+		# Already mirrored? Then reuse it.
+		_sy_rel=$(while IFS="$(printf '\t')" read -r _s _m || [ -n "$_s" ]; do
+			[ "$_s" = "$_sy_src" ] && printf '%s' "$_m" && break
+		done < "$_sy_seen")
+
+		if [ -z "$_sy_rel" ]; then
+			_sy_rel=$(stage_mirror_path "$_sy_src")
+			# Disambiguate a genuine clash between two different source
+			# directories that share <kind>/<name>.
+			_sy_try=$_sy_rel
+			_sy_i=1
+			while [ -d "$_sy_out/input/$_sy_try" ] && \
+				! grep -q "	$_sy_try\$" "$_sy_seen"; do
+				_sy_i=$((_sy_i + 1))
+				_sy_try="$_sy_rel-$_sy_i"
+			done
+			_sy_rel=$_sy_try
+
+			mkdir -p -- "$_sy_out/input/$_sy_rel" || return 1
+			printf '%s\t%s\n' "$_sy_src" "$_sy_rel" >> "$_sy_seen" || return 1
+
+			# The stylesheet's siblings come too, so relative url() keeps
+			# working. Files only, and not the whole subtree: fonts/ is staged
+			# separately and by a mechanism that knows about acquisition, and
+			# copying a theme's entire directory would drag in its .git and
+			# every source asset it was built from.
+			for _sy_sib in "$_sy_src"/*; do
+				[ -f "$_sy_sib" ] || continue
+				cp -- "$_sy_sib" "$_sy_out/input/$_sy_rel/" 2>/dev/null || :
+			done
+		fi
+
+		_sy_dest="input/$_sy_rel/$(basename -- "$_sy_file")"
+		# The sibling copy above will usually have placed it already; this is
+		# for a stylesheet named from outside the directory it sits in, and for
+		# --css, which is any file the user pointed at.
+		if [ ! -f "$_sy_out/$_sy_dest" ]; then
+			cp -- "$_sy_file" "$_sy_out/$_sy_dest" || return 1
+		fi
+
 		_sy_n=$((_sy_n + 1))
-		# Zero-padded so a plain sort of the directory matches the cascade
-		# order, and suffixed with the level's name so the listing says what
-		# each part is without cross-referencing the manifest.
-		_sy_name=$(printf '%02d-%s.css' "$_sy_n" \
-			"$(styling_level_name "$_sy_level")")
-		cp -- "$_sy_file" "$_sy_out/styling/$_sy_name" || return 1
+		stage_manifest_add "$_sy_out" styling "$_sy_level" \
+			"$(styling_level_name "$_sy_level")" "$_sy_dest" || return 1
 
-		printf '%s\t%s\t%s\n' "$_sy_level" \
-			"$(styling_level_name "$_sy_level")" "styling/$_sy_name" \
-			>> "$_sy_out/styling.manifest" || return 1
-
-		# The concatenation, with the ORIGINAL path in the provenance comment.
-		# The staged copy's name says where it sits in the cascade; the comment
-		# has to say which file in the user's tree to go and edit, and after
-		# copying only this loop still knows that.
+		# The concatenation names the ORIGINAL path in its provenance comment:
+		# the mirror says where a file sits in the cascade, but the comment has
+		# to say which file in the user's tree to go and edit.
+		#
+		# Note that url() inside this concatenation resolves against print.css
+		# at the root, NOT against the mirror -- which is the other half of why
+		# an engine reading the manifest is better off than one reading this.
 		printf '/* --- %s --- */\n' "$_sy_file" >> "$_sy_out/print.css"
 		cat -- "$_sy_file" >> "$_sy_out/print.css" || return 1
 		printf '\n' >> "$_sy_out/print.css"
 	done < "$_sy_list"
 
-	rm -f "$_sy_list"
+	rm -f "$_sy_list" "$_sy_seen"
+	return 0
+}
+
+
+# Where a source directory is mirrored inside the staged directory.
+#
+#   stage_mirror_path <source-dir>
+#
+# <kind>/<name>, e.g. themes/classic, templates/html-mustache-vivlio, and with
+# the sub-axis kept where there is one: themes/classic/stylers/vivliostyle.
+# That last part matters -- it is exactly the case where one theme contributes
+# two files of the same name.
+#
+# Anything that matches none of the known kinds is mirrored under external/,
+# keyed by name alone: --css can point at any file on the disk, and a path from
+# the user's home has no place in a directory that gets mounted or shipped.
+stage_mirror_path() {  # stage_mirror_path <source-dir>
+	_smp=$1
+
+	# Walk all the way up, remembering the LAST (outermost) recognised kind
+	# rather than stopping at the first. Stopping at the first is wrong for a
+	# theme's own engine axis: themes/leaf/engines/E has `engines` as its
+	# immediate parent, so the innermost match mirrors it to engines/E and
+	# every theme in the chain lands on the same path, silently overwriting
+	# the others. The outermost match keeps it under themes/leaf/engines/E.
+	_smp_kind=""
+	_smp_name=""
+	_smp_tail=""
+	_smp_seen=""
+	_smp_cur=$_smp
+	while [ -n "$_smp_cur" ] && [ "$_smp_cur" != "/" ] && [ "$_smp_cur" != "." ]; do
+		_smp_base=$(basename -- "$_smp_cur")
+		_smp_parent=$(dirname -- "$_smp_cur")
+		case $(basename -- "$_smp_parent") in
+			themes|templates|engines)
+				_smp_kind=$(basename -- "$_smp_parent")
+				_smp_name=$_smp_base
+				_smp_tail=$_smp_seen
+				;;
+		esac
+		if [ -n "$_smp_seen" ]; then
+			_smp_seen="$_smp_base/$_smp_seen"
+		else
+			_smp_seen=$_smp_base
+		fi
+		_smp_cur=$_smp_parent
+	done
+
+	if [ -n "$_smp_kind" ]; then
+		if [ -n "$_smp_tail" ]; then
+			printf '%s/%s/%s\n' "$_smp_kind" "$_smp_name" "$_smp_tail"
+		else
+			printf '%s/%s\n' "$_smp_kind" "$_smp_name"
+		fi
+		return 0
+	fi
+
+	printf 'external/%s\n' "$(basename -- "$_smp")"
 	return 0
 }
 
