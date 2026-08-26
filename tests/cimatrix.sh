@@ -88,6 +88,16 @@ for e in $ENGINES; do
 	check "$e's image has a tag" "yes" \
 	      "$(echo "$image" | grep -q ':' && echo yes || echo no)"
 
+	# Docker Hub for now, deliberately, though ghcr is where this is headed
+	# -- same ecosystem as the source and the releases, and no v1/v2 legacy.
+	# The blocker is that a GHCR package is PRIVATE on first publish, unlike
+	# Docker Hub, so an anonymous `docker pull` gets 401/403 and every user
+	# without a GHCR login breaks. Switching needs the package made public
+	# first; planned for the move to the pdfulator org, where visibility gets
+	# set fresh anyway. CI already pushes to both, so the switch is this key.
+	check "$e pulls from a public registry" "yes" \
+	      "$(echo "$image" | grep -q '^ghcr\.io/' && echo no || echo yes)"
+
 	# CI derives the tag by stripping everything up to the colon, so a tag
 	# containing one would silently truncate.
 	tag=${image##*:}
@@ -109,6 +119,14 @@ check "every engine's tag is distinct" "yes" \
          [ "$n" = "$u" ] && echo yes || echo no)"
 
 
+# Publishing is deliberately wider than pulling: both registries get every
+# image, so switching engine.conf back to Docker Hub needs no CI change.
+check "CI still publishes to Docker Hub" "yes" \
+      "$(grep -q 'DOCKERHUB_SLUG' "$CI" && echo yes || echo no)"
+check "CI still publishes to ghcr" "yes" \
+      "$(grep -q 'GHCR_SLUG' "$CI" && echo yes || echo no)"
+
+
 echo "============ NO UNSUFFIXED TAGS ============"
 # With three engines in one repository, a bare `:latest` or `:3.0.0` would have
 # to mean one arbitrary engine -- whichever merged last. Every version tag
@@ -117,6 +135,33 @@ check "latest is disabled" "yes" \
       "$(grep -q 'latest=false' "$CI" && echo yes || echo no)"
 check "version tags are suffixed with the engine" "yes" \
       "$(grep -q 'suffix=-\${{ env.ENGINE_TAG }}' "$CI" && echo yes || echo no)"
+
+# The bare `:<engine>` tag is what engine.conf's `image=` names and what an
+# installed pdfulator pulls, so something must produce it. It was gated on
+# {{is_default_branch}} at first, which never fires on a tag build -- so the
+# first alpha published six suffixed tags and no `:vivlio` at all.
+check "the moving-latest tag is produced" "yes" \
+      "$(grep -q 'type=raw,value=\${{ env.ENGINE_TAG }}' "$CI" && echo yes || echo no)"
+
+# ...but only on a release tag. A default-branch push would let any untested
+# commit become what every user pulls. Prereleases DO move it during the v3
+# development phase -- deliberately, since there is no stable v3 yet and the
+# tag would otherwise be frozen at v2 or missing entirely.
+check "moving-latest is not gated on the branch" "0" \
+      "$(grep -c 'value=\${{ env.ENGINE_TAG }},suffix=,enable={{is_default_branch}}' "$CI")"
+check "moving-latest is gated on a release tag" "yes" \
+      "$(grep -q 'enable=\${{ steps.channel.outputs.release }}' "$CI" && echo yes || echo no)"
+check "the release channel is computed from the ref" "yes" \
+      "$(grep -q 'refs/tags/v\*)' "$CI" && echo yes || echo no)"
+
+
+echo "============ PRERELEASES ARE MARKED ============"
+# softprops/action-gh-release does not infer this from the tag name, so
+# v3.0.0-alpha1 publishes as a full release and becomes GitHub's "Latest" --
+# which is what anyone landing on the releases page is offered first.
+check "the release is marked prerelease by tag shape" "yes" \
+      "$(grep -q 'prerelease: .*contains(github.ref_name' "$CI" &&
+         echo yes || echo no)"
 
 
 echo "============ THE BAKE FILE ============"
