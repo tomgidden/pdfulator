@@ -29,7 +29,7 @@ fixture() {
 	# installed afresh per case. Per-engine now, since that is where an
 	# engine's dependencies live.
 	ln -s $REPO/node_modules "$W/home/node_modules" 2>/dev/null
-	ln -s $REPO/engines/vivlio/node_modules "$W/home/engines/vivlio/node_modules" 2>/dev/null
+	ln -s $REPO/engines/vivlio/_nopayload/node_modules "$W/home/engines/vivlio/_nopayload/node_modules" 2>/dev/null
 	printf '# T\n\nBody.\n' > "$W/work/t.md"
 	mkdir -p "$W/theme-b" && : > "$W/theme-b/print.css"
 	cd "$W/work" || exit 1

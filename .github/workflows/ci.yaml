@@ -403,9 +403,12 @@ jobs:
       # Per engine, not at the repository root: v3 has no root package.json.
       # A JS engine carries its own, because a `pandoc-xslt` user never meets
       # bun and should not be made to install its dependencies.
+      #
+      # Under _nopayload/, with the rest of the engine's program: dependencies
+      # are what the engine runs, not content a payload carries.
       - name: Verify lockfiles are current
         run: |
-          for pkg in engines/*/package.json; do
+          for pkg in engines/*/_nopayload/package.json; do
             echo "==> ${pkg%/package.json}"
             ( cd "$(dirname "$pkg")" && bun install --frozen-lockfile )
           done

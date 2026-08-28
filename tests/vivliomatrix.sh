@@ -44,8 +44,8 @@ if [ -z "$CHROME_PATH" ] || [ -z "$PDFULATOR_RUNTIME" ]; then
 	exit 0
 fi
 
-if [ ! -d "$ROOT/engines/vivlio/node_modules" ]; then
-	echo "SKIP: engines/vivlio/node_modules is missing (run: cd engines/vivlio && bun install)"
+if [ ! -d "$ROOT/engines/vivlio/_nopayload/node_modules" ]; then
+	echo "SKIP: engines/vivlio/_nopayload/node_modules is missing (run: cd engines/vivlio/_nopayload && bun install)"
 	exit 0
 fi
 

@@ -66,7 +66,7 @@ RUN npm install -g --unsafe-perm --ignore-scripts pagedjs-cli
 # Mustache placeholders, and the two being interchangeable by filename is
 # exactly what produced a PDF with template markup printed in it.
 COPY templates/html-pandoc-pagedjs/article.tmpl /engine/article.tmpl
-COPY engines/pandoc-pagedjs/metadata.lua        /engine/metadata.lua
+COPY engines/pandoc-pagedjs/_nopayload/metadata.lua        /engine/metadata.lua
 
 # The fallback theme, for a bare `docker run` that mounts nothing. Normally the
 # wrapper stages a theme and mounts it over this.
@@ -97,7 +97,7 @@ RUN mkdir -p /in /out /work \
 USER node
 WORKDIR /work
 
-COPY --chmod=755 engines/pandoc-pagedjs/render /usr/local/bin/render
+COPY --chmod=755 engines/pandoc-pagedjs/_nopayload/render /usr/local/bin/render
 
 # The engine contract, verbatim: <input|-> <output|-> <theme-dir>. Defaulting
 # to stdin -> stdout with the built-in theme is what makes the image usable

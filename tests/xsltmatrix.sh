@@ -119,13 +119,13 @@ echo "============ VENDORED FOP ============"
 # dead -- mirrors drop old releases -- so the archive is the only durable
 # source, and a pinned checksum is what makes the fetch trustworthy.
 check "a FOP version is pinned" "yes" \
-      "$(grep -qE '^ARG FOP_VERSION=' "$ENGINE/Dockerfile" && echo yes || echo no)"
+      "$(grep -qE '^ARG FOP_VERSION=' "$ENGINE/_nopayload/Dockerfile" && echo yes || echo no)"
 check "a checksum is pinned" "yes" \
-      "$(grep -qE '^ARG FOP_SHA512=[0-9a-f]{128}$' "$ENGINE/Dockerfile" && echo yes || echo no)"
+      "$(grep -qE '^ARG FOP_SHA512=[0-9a-f]{128}$' "$ENGINE/_nopayload/Dockerfile" && echo yes || echo no)"
 check "it is verified, not just downloaded" "yes" \
-      "$(grep -q 'sha512sum -c' "$ENGINE/Dockerfile" && echo yes || echo no)"
+      "$(grep -q 'sha512sum -c' "$ENGINE/_nopayload/Dockerfile" && echo yes || echo no)"
 check "from the permanent archive" "yes" \
-      "$(grep -q 'archive.apache.org' "$ENGINE/Dockerfile" && echo yes || echo no)"
+      "$(grep -q 'archive.apache.org' "$ENGINE/_nopayload/Dockerfile" && echo yes || echo no)"
 
 echo
 [ "$FAIL" -eq 0 ] && echo "ALL EXPECTATIONS MET" || echo "SOME EXPECTATIONS MISSED"

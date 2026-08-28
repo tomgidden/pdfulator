@@ -16,7 +16,7 @@
 # pandoc takes a YAML sidecar as a second *input file* rather than as an
 # option, and the order of those files decides which metadata wins.
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-RENDER=$REPO/engines/pandoc-pagedjs/render
+RENDER=$REPO/engines/pandoc-pagedjs/_nopayload/render
 
 BASE=$(printf '%s' "${TMPDIR:-/tmp}" | sed 's|/*$||')/pdfulator-pandocmatrix.$$
 FAIL=0

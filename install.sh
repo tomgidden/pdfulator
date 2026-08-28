@@ -261,10 +261,16 @@ if [ -d "$PDFULATOR_HOME" ]; then
 	# Per-engine because dependencies are: a release that changes vivlio must
 	# not throw away a pandoc engine's tree, and an engine the user never
 	# installed has nothing to preserve either way.
+	# _nopayload/ is where an engine keeps its program, node_modules and lock
+	# file included -- see lib/stage.sh. Both sides of this comparison look
+	# there, so an installation from before that move simply has nothing to
+	# preserve and reinstalls, which is the safe direction.
 	for _eng_dir in "$staging"/engines/*; do
 		[ -d "$_eng_dir" ] || continue
 		_eng=$(basename "$_eng_dir")
-		_old="$PDFULATOR_HOME/engines/$_eng"
+		_old="$PDFULATOR_HOME/engines/$_eng/_nopayload"
+		_eng_dir="$_eng_dir/_nopayload"
+		[ -d "$_eng_dir" ] || continue
 		[ -d "$_old/node_modules" ] || continue
 
 		old_lock=""; new_lock=""

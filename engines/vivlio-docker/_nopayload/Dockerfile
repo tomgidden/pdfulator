@@ -40,7 +40,7 @@ ENV CHROME_PATH=/usr/bin/chromium
 # The engine's dependencies, from the vivlio engine's own lockfile -- the same
 # file the bundled engine installs from, so the two cannot drift.
 WORKDIR /app
-COPY engines/vivlio/package.json engines/vivlio/bun.lock ./
+COPY engines/vivlio/_nopayload/package.json engines/vivlio/_nopayload/bun.lock ./
 RUN bun install --frozen-lockfile
 
 # The built-in theme, then the engine itself.
@@ -61,7 +61,7 @@ COPY themes         ./themes
 COPY templates      ./templates
 COPY themes/default ./theme
 COPY templates/html-mustache-vivlio/article.tmpl ./theme/article.tmpl
-COPY engines/vivlio/main.js ./
+COPY engines/vivlio/_nopayload/main.js ./
 
 # Where the wrapper mounts things. Created here, and owned by the runtime user,
 # so that a container writing an output file into /out can do so without the
