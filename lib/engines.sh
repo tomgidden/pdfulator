@@ -1,9 +1,16 @@
 # lib/engines.sh — engine discovery, selection and dispatch.
 #
-# An engine is a directory under engines/ containing an `engine.conf` and an
-# executable `convert`. That is the whole of it: adding one is dropping in a
-# directory, which is the point of the refactor -- the future pagedjs engine
-# should be a small addition rather than a fork of the tool.
+# An engine is a directory under engines/ containing an `engine.conf` and the
+# executable that conf file names. That is the whole of it: adding one is
+# dropping in a directory, which is the point of the refactor -- the future
+# pagedjs engine should be a small addition rather than a fork of the tool.
+#
+# The entry point is `convert = <path>`, relative to the engine directory, and
+# `./convert` when the key is absent. Only the conf file is found by a fixed
+# name; everything else an engine owns is named BY that conf file -- the same
+# rule templates and themes follow with `markup` and `stylesheet`. Where an
+# engine puts its program is then its own business: at the root, under
+# _nopayload/, anywhere it likes.
 #
 # Requires lib/conf.sh and lib/paths.sh.
 #
@@ -39,7 +46,7 @@ engines_list() {
 	for _el in "$ENGINES_DIR"/*; do
 		[ -d "$_el" ] || continue
 		[ -f "$_el/engine.conf" ] || continue
-		[ -x "$_el/convert" ] || continue
+		[ -x "$(engine_entry "$(basename -- "$_el")")" ] || continue
 		basename -- "$_el"
 	done
 }
@@ -57,9 +64,44 @@ engine_get() {  # engine_get <id> <key>
 }
 
 
+# The engine's entry point: the program the wrapper runs to convert a document.
+#
+#   engine_entry <id>
+#
+# Declared as `convert = <path>` in engine.conf, resolved against the engine's
+# own directory, and defaulting to `./convert` so an engine that says nothing
+# still works. Printed as an absolute path; the file is not checked here, since
+# callers want to distinguish "not declared" from "declared but missing".
+#
+# Named by the conf file rather than found by a fixed name because that is the
+# rule everywhere else in the design: the only hardcoded paths are the conf
+# files, and an object's contents are named by its own conf file. The shipped
+# engines all keep `convert` at the root, which is why the default is what it
+# is -- but that is now their choice to state rather than an assumption the
+# wrapper makes about every engine anyone might write.
+engine_entry() {  # engine_entry <id>
+	_ee_dir="$ENGINES_DIR/$1"
+	_ee_rel=$(conf_get "$_ee_dir/engine.conf" convert 2>/dev/null) || _ee_rel=""
+	[ -n "$_ee_rel" ] || _ee_rel=./convert
+
+	# A leading ./ is idiomatic in the conf file and noise in the result: this
+	# path appears in error messages and in ps output, and `.../vivlio/./convert`
+	# reads like a bug in the wrapper rather than a path from a config file.
+	_ee_rel=${_ee_rel#./}
+
+	# Absolute stays absolute -- unlikely, but an engine installed outside the
+	# tree is not this function's business to forbid.
+	case $_ee_rel in
+		/*) printf '%s\n' "$_ee_rel" ;;
+		*)  printf '%s/%s\n' "$_ee_dir" "$_ee_rel" ;;
+	esac
+}
+
+
 engine_exists() {  # engine_exists <id>
 	[ -n "${1:-}" ] || return 1
-	[ -f "$ENGINES_DIR/$1/engine.conf" ] && [ -x "$ENGINES_DIR/$1/convert" ]
+	[ -f "$ENGINES_DIR/$1/engine.conf" ] || return 1
+	[ -x "$(engine_entry "$1")" ]
 }
 
 
@@ -331,5 +373,5 @@ engine_convert() {  # engine_convert <id> <input|-> <output|-> <theme-dir>
 	# at. Everything an engine used to find there now arrives in the staged
 	# theme it is handed as its third argument.
 	PDFULATOR_HOME="$PDFULATOR_HOME" \
-		"$ENGINES_DIR/$_ec_id/convert" "$@"
+		"$(engine_entry "$_ec_id")" "$@"
 }

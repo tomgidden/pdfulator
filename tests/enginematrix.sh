@@ -123,6 +123,54 @@ mkdir -p "$ENGINES_DIR/broken" && printf 'id=broken\n' > "$ENGINES_DIR/broken/en
 check "an engine with no convert is not listed" "" \
       "$(engines_list | grep '^broken$')"
 setup
+
+
+echo "============ THE ENTRY POINT ============"
+
+# The only path pdfulator hardcodes is engine.conf; what it runs is named BY
+# engine.conf. `./convert` is a default, not an assumption -- an engine may put
+# its program wherever it likes and say so.
+setup
+check "an undeclared entry point defaults to ./convert" \
+      "$ENGINES_DIR/vivlio/convert" "$(engine_entry vivlio)"
+
+# The case that proves the declaration is actually followed. A default-shaped
+# check would pass whether or not engine_entry read the conf file at all, so
+# the fixture puts the program somewhere the default could never find it.
+setup
+mkdir -p "$ENGINES_DIR/declared/_nopayload"
+{
+	printf 'id=declared\n'
+	printf 'convert = ./_nopayload/run\n'
+} > "$ENGINES_DIR/declared/engine.conf"
+cat > "$ENGINES_DIR/declared/_nopayload/run" <<'RUNEOF'
+#!/bin/sh
+printf 'declared engine ran\n'
+RUNEOF
+chmod +x "$ENGINES_DIR/declared/_nopayload/run"
+
+check "a declared entry point is resolved" \
+      "$ENGINES_DIR/declared/_nopayload/run" "$(engine_entry declared)"
+check "and there is no ./convert to fall back on" "no" \
+      "$([ -e "$ENGINES_DIR/declared/convert" ] && echo yes || echo no)"
+check "the engine exists on the strength of it" "0" \
+      "$(engine_exists declared; echo $?)"
+check "and is listed" "declared" "$(engines_list | grep '^declared$')"
+check "and is what actually runs" "declared engine ran" \
+      "$(engine_convert declared - - '' 2>/dev/null)"
+
+# Declared but absent is the half-installed case again, and must fail the same
+# way rather than being listed on the strength of the declaration alone.
+setup
+mkdir -p "$ENGINES_DIR/missing"
+{
+	printf 'id=missing\n'
+	printf 'convert = ./_nopayload/run\n'
+} > "$ENGINES_DIR/missing/engine.conf"
+check "a declared entry point that is not there is not listed" "" \
+      "$(engines_list | grep '^missing$')"
+check "nor does it exist" "1" "$(engine_exists missing; echo $?)"
+setup
 mkdir -p "$ENGINES_DIR/halfway" && : > "$ENGINES_DIR/halfway/convert"
 chmod +x "$ENGINES_DIR/halfway/convert"
 check "an engine with no conf is not listed" "" \
