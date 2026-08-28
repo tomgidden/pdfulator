@@ -168,7 +168,7 @@ echo "============ THE BAKE FILE ============"
 # The default ./Dockerfile does not exist: each engine owns its own, so the
 # path must be parameterised by engine.
 check "bake picks the Dockerfile by engine" "yes" \
-      "$(grep -q 'engines/\${ENGINE}/Dockerfile' "$BAKE" && echo yes || echo no)"
+      "$(grep -q 'engines/\${ENGINE}/_nopayload/Dockerfile' "$BAKE" && echo yes || echo no)"
 check "ENGINE is a bake variable" "yes" \
       "$(grep -q 'variable "ENGINE"' "$BAKE" && echo yes || echo no)"
 
@@ -184,7 +184,7 @@ check "ENGINE is passed to bake via the environment" "yes" \
 # path bake cannot resolve.
 for e in $ENGINES; do
 	check "$e has a Dockerfile" "yes" \
-	      "$([ -f "$REPO/engines/$e/Dockerfile" ] && echo yes || echo no)"
+	      "$([ -f "$REPO/engines/$e/_nopayload/Dockerfile" ] && echo yes || echo no)"
 done
 
 
@@ -211,7 +211,7 @@ check "no root package.json (v3 layout)" "yes" \
 check "CI does not install at the repository root" "0" \
       "$(grep -c '^        run: bun install --frozen-lockfile$' "$CI")"
 check "CI installs per engine" "yes" \
-      "$(grep -q 'engines/\*/package.json' "$CI" && echo yes || echo no)"
+      "$(grep -q 'engines/\*/_nopayload/package.json' "$CI" && echo yes || echo no)"
 
 # Every engine declaring a JS runtime needs a lockfile, or the tarball ships
 # something the target machine cannot reproduce.
@@ -220,7 +220,7 @@ for _c in "$REPO"/engines/*/engine.conf; do
 	grep -q '^needs_runtime=js' "$_c" || continue
 	_e=$(basename "${_c%/engine.conf}")
 	check "$_e has a lockfile" "yes" \
-	      "$([ -f "$REPO/engines/$_e/bun.lock" ] && echo yes || echo no)"
+	      "$([ -f "$REPO/engines/$_e/_nopayload/bun.lock" ] && echo yes || echo no)"
 done
 
 

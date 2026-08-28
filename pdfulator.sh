@@ -198,7 +198,10 @@ list_runtimes() {
 # `--list-browsers | awk` arrangement had to go.
 install_browser() {
 	_ib_engine=$(engine_resolve "${engine:-}") || return 1
-	_ib_script="$PDFULATOR_DIR/engines/$_ib_engine/install-browser.js"
+	# Under _nopayload/ with the rest of the engine's program: a browser
+	# installer is machinery the engine runs here, never content a payload
+	# carries to a container or a remote host.
+	_ib_script="$PDFULATOR_DIR/engines/$_ib_engine/_nopayload/install-browser.js"
 
 	[ -f "$_ib_script" ] || {
 		echo "pdfulator: the $_ib_engine engine cannot download a browser." >&2
@@ -232,7 +235,10 @@ install_deps() {
 	for _id_engine in $(engines_list); do
 		engine_needs_runtime "$_id_engine" || continue
 
-		_id_dir="$PDFULATOR_DIR/engines/$_id_engine"
+		# The manifest and the installed tree both live under _nopayload/,
+		# beside the code that imports them -- dependencies are part of the
+		# engine's program, not of what it hands to a renderer.
+		_id_dir="$PDFULATOR_DIR/engines/$_id_engine/_nopayload"
 		[ -f "$_id_dir/package.json" ] || continue
 
 		echo "Installing dependencies for the $_id_engine engine..." >&2
@@ -872,9 +878,10 @@ if [ "$command" = "uninstall" ]; then
 	# chromium/ and bun/ are things we downloaded, so all three go
 	# unconditionally. A system-wide bun is untouched -- we only ever wrote here.
 	rm -rf "$PDFULATOR_HOME/node_modules" "$PDFULATOR_HOME/chromium" "$BUN_HOME"
-	# Engines keep their own node_modules now, so removing the top-level one
-	# is no longer enough to leave a clean tree.
-	rm -rf "$PDFULATOR_HOME"/engines/*/node_modules
+	# Engines keep their own node_modules now, under _nopayload/ with the rest
+	# of their program, so removing the top-level one is no longer enough to
+	# leave a clean tree.
+	rm -rf "$PDFULATOR_HOME"/engines/*/_nopayload/node_modules
 	# Which engines have been prepared: a record of downloads, not the
 	# downloads themselves, and meaningless once the engines are gone.
 	rm -rf "$PDFULATOR_HOME/.prepared"

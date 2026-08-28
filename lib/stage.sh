@@ -65,6 +65,26 @@
 # root does NOT resolve into the mirror, which is a further reason for an
 # engine to prefer the manifest.
 #
+# --- WHAT IS MIRRORED, AND WHAT IS NOT ---------------------------------------
+#
+# Every object the build selected is copied WHOLE -- the engine, the template
+# it names, each theme in the chain, and within each theme the engine and
+# styler axes that were chosen. Whole, because an object's files refer to each
+# other in ways only that object's ecosystem understands: a Mustache partial,
+# an @import, a SYSTEM entity, an image behind a url(). The alternative is a
+# dependency scanner per ecosystem, which is what template.support exists to
+# avoid needing.
+#
+# The consequence worth stating: EVERY SELECTED OBJECT'S CONF FILE IS PRESENT,
+# including a theme that contributes no stylesheet at all -- it still carries
+# the `extends` a walk follows, and leaving it out puts a hole in the chain.
+# That is what makes the payload self-describing, and it is the precondition
+# for an engine reading what each object declared rather than being handed a
+# manifest or hunting for a file by an agreed name.
+#
+# What does not travel: `_nopayload/`, plus whatever an object adds with
+# `do.not.payload` in its own conf file. See STAGE_NOPAYLOAD_DEFAULT below.
+#
 # Requires lib/conf.sh, lib/paths.sh, lib/theme.sh, lib/template.sh,
 # lib/styling.sh and lib/fonts.sh.
 
@@ -229,6 +249,19 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 		done
 	done
 
+	# --- The selected objects, mirrored --------------------------------------
+	#
+	# Every object that took part in this build, copied whole to its position
+	# in the source tree, so the payload describes itself: an engine can read
+	# engine.conf, follow `extends` from theme to theme and find `markup` in a
+	# template.conf, rather than being told what to read by a manifest.
+	#
+	# First, so that the stagers below overwrite rather than are overwritten --
+	# stage_styling in particular resolves a stylesheet's real path and must
+	# win over a copy that arrived here by being in the same directory.
+	stage_mirror_all "$_sb_chain" "$_sb_engine" "$_sb_styler" "$_sb_out" \
+		|| return 1
+
 	# --- The styling cascade -------------------------------------------------
 	#
 	# print.css and its manifest. --css arrives here as the highest level
@@ -293,6 +326,12 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 		fonts_fop_xconf "$_sb_merged" "$_sb_out/fonts" "$_sb_fontbase" \
 			"$_sb_out/fop-fonts.xconf" || return 1
 	fi
+
+	# Scratch state, not part of the payload: the map exists so that two
+	# stagers agree on where a source directory was mirrored, and once both
+	# have run there is nothing left to agree about. An engine that found it
+	# might reasonably think it meant something.
+	rm -f "$_sb_out/.mirror.map"
 
 	return 0
 }
@@ -500,11 +539,6 @@ stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
 	mkdir -p -- "$_sy_out/input" || return 1
 	: > "$_sy_out/print.css" || return 1
 
-	# Which source directories have already been mirrored, so a second
-	# stylesheet from the same theme lands beside the first rather than in a
-	# second copy of it. One line per directory: "<src>\t<mirror>".
-	_sy_seen="$_sy_out/.styling.seen"
-	: > "$_sy_seen" || return 1
 	_sy_n=0
 
 	while IFS="$(printf '\t')" read -r _sy_level _sy_file || [ -n "$_sy_level" ]; do
@@ -513,37 +547,26 @@ stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
 
 		_sy_src=$(dirname -- "$_sy_file")
 
-		# Already mirrored? Then reuse it.
-		_sy_rel=$(while IFS="$(printf '\t')" read -r _s _m || [ -n "$_s" ]; do
-			[ "$_s" = "$_sy_src" ] && printf '%s' "$_m" && break
-		done < "$_sy_seen")
+		# Where this stylesheet's directory is mirrored. Shared with
+		# stage_mirror_object rather than worked out again here: a selected
+		# object has usually been mirrored whole already, and the stylesheet
+		# must land inside that copy rather than in a second one beside it.
+		_sy_rel=$(stage_mirror_alloc "$_sy_src" "$_sy_out") || return 1
+		mkdir -p -- "$_sy_out/input/$_sy_rel" || return 1
 
-		if [ -z "$_sy_rel" ]; then
-			_sy_rel=$(stage_mirror_path "$_sy_src")
-			# Disambiguate a genuine clash between two different source
-			# directories that share <kind>/<name>.
-			_sy_try=$_sy_rel
-			_sy_i=1
-			while [ -d "$_sy_out/input/$_sy_try" ] && \
-				! grep -q "	$_sy_try\$" "$_sy_seen"; do
-				_sy_i=$((_sy_i + 1))
-				_sy_try="$_sy_rel-$_sy_i"
-			done
-			_sy_rel=$_sy_try
-
-			mkdir -p -- "$_sy_out/input/$_sy_rel" || return 1
-			printf '%s\t%s\n' "$_sy_src" "$_sy_rel" >> "$_sy_seen" || return 1
-
-			# The stylesheet's siblings come too, so relative url() keeps
-			# working. Files only, and not the whole subtree: fonts/ is staged
-			# separately and by a mechanism that knows about acquisition, and
-			# copying a theme's entire directory would drag in its .git and
-			# every source asset it was built from.
-			for _sy_sib in "$_sy_src"/*; do
-				[ -f "$_sy_sib" ] || continue
-				cp -- "$_sy_sib" "$_sy_out/input/$_sy_rel/" 2>/dev/null || :
-			done
-		fi
+		# The stylesheet's siblings come too, so relative url() keeps working.
+		# Files only, and not the whole subtree: fonts/ is staged separately by
+		# a mechanism that knows about acquisition, and copying a theme's
+		# entire directory would drag in its .git and every source asset it was
+		# built from.
+		#
+		# Still needed alongside the object mirror, because a stylesheet may be
+		# named from outside any selected object -- most obviously --css, which
+		# points at a file anywhere on the disk.
+		for _sy_sib in "$_sy_src"/*; do
+			[ -f "$_sy_sib" ] || continue
+			cp -- "$_sy_sib" "$_sy_out/input/$_sy_rel/" 2>/dev/null || :
+		done
 
 		_sy_dest="input/$_sy_rel/$(basename -- "$_sy_file")"
 		# The sibling copy above will usually have placed it already; this is
@@ -569,7 +592,7 @@ stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
 		printf '\n' >> "$_sy_out/print.css"
 	done < "$_sy_list"
 
-	rm -f "$_sy_list" "$_sy_seen"
+	rm -f "$_sy_list"
 	return 0
 }
 
@@ -628,6 +651,296 @@ stage_mirror_path() {  # stage_mirror_path <source-dir>
 	fi
 
 	printf 'external/%s\n' "$(basename -- "$_smp")"
+	return 0
+}
+
+
+# What never travels into the payload.
+#
+# The payload is what the engine READS; `_nopayload/` is everything else in the
+# object that stays where it is. In engines/vivlio that is main.js, convert,
+# node_modules and package.json -- the program itself, already installed where
+# the engine runs, and pointless-to-harmful to copy into a directory that gets
+# mounted into a container or sent to a remote host.
+#
+# The name states the rule rather than the usual contents, so a hand-written
+# file that simply should not ship has an obvious home. The `_` prefix is the
+# same one _payload.css uses: this directory is pdfulator's convention rather
+# than the author's content, so it sorts apart and cannot collide with a theme
+# that happens to have a directory of its own by that name.
+#
+# `_nopayload` is the convention, and it is only a default: an object states
+# its exclusions in its own conf file, under the same `+` rule as every other
+# list key --
+#
+#     do.not.payload = +convert          add to the default
+#     do.not.payload = build             replace it; _nopayload now travels
+#
+# so the decision sits with the object that owns the files, exactly as `markup`
+# and `stylesheet` do, and an object with an unusual layout has a way to say so
+# rather than needing a change here.
+#
+# `convert` is why the exception matters. It is the engine's contract with the
+# wrapper, which finds it by name at the object root (lib/engines.sh), so it
+# cannot be moved in beside the rest of the program -- yet it is the program,
+# and an executable in a directory that gets mounted into a container or sent
+# to a remote host is at best noise and at worst something that runs. Each
+# engine.conf therefore adds it.
+#
+# engine.conf itself always travels, and must: it is what an engine walking the
+# payload reads to learn what the engine declared. Excluding an object's own
+# conf file would make the payload undescribable, so it is not offered.
+STAGE_NOPAYLOAD_DEFAULT="_nopayload"
+
+# The conf file each kind of object keeps its declarations in. `do.not.payload`
+# is read from whichever of these the object has; a directory with none simply
+# gets the default.
+STAGE_CONF_NAMES="engine.conf template.conf theme.conf theme-engine.conf \
+                  theme-styler.conf theme-template.conf"
+
+
+# What one object excludes from the payload.
+#
+#   stage_nopayload_list <source-dir>
+#
+# The default, plus or replaced by whatever the object's conf file declares.
+# Names, not paths: a `do.not.payload` entry matches an entry in the object's
+# own directory, and nested exclusions are the nested object's business.
+stage_nopayload_list() {  # stage_nopayload_list <source-dir>
+	_snl_dir=$1
+
+	# Collected from every conf file the object has, then folded in one pass.
+	# A `while read` at the end of a pipe runs in a subshell in POSIX sh, so
+	# accumulating there and printing here would print the default every time;
+	# command substitution keeps the fold in this shell.
+	_snl_vals=""
+	for _snl_name in $STAGE_CONF_NAMES; do
+		[ -f "$_snl_dir/$_snl_name" ] || continue
+		_snl_vals="$_snl_vals$(conf_get_all "$_snl_dir/$_snl_name" \
+			do.not.payload 2>/dev/null)
+"
+	done
+
+	_snl_out=$STAGE_NOPAYLOAD_DEFAULT
+	_snl_replaced=0
+	_snl_saved=$IFS
+	IFS='
+'
+	for _snl_v in $_snl_vals; do
+		[ -n "$_snl_v" ] || continue
+		if styling_is_add "$_snl_v"; then
+			_snl_v=${_snl_v#+}
+			_snl_v=${_snl_v#"${_snl_v%%[! 	]*}"}
+			_snl_out="$_snl_out $_snl_v"
+		elif [ "$_snl_replaced" = 0 ]; then
+			# A bare value replaces, the same reading `stylesheet = x.css`
+			# has: this object's list, not the default with something added.
+			# Only the first one replaces; the rest accumulate, or a second
+			# bare line would silently discard the first.
+			_snl_out=$_snl_v
+			_snl_replaced=1
+		else
+			_snl_out="$_snl_out $_snl_v"
+		fi
+	done
+	IFS=$_snl_saved
+
+	printf '%s\n' "$_snl_out"
+	return 0
+}
+
+
+# Where one source directory is mirrored, allocated once and remembered.
+#
+#   stage_mirror_alloc <source-dir> <staged-dir>
+#
+# stage_mirror_path says where a directory *would* go; this says where it
+# actually went, which is not the same question once two stagers mirror into
+# the same tree. Two different source directories can share a <kind>/<name> --
+# `--theme ./classic` next to a shipped `themes/classic` -- and the second must
+# land somewhere else or silently overwrite the first.
+#
+# The record is the authority, not the filesystem. Testing "does this directory
+# exist yet" was enough while stage_styling was the only mirrorer, but a
+# directory now usually exists because stage_mirror_object put it there for the
+# very source being asked about -- so the existence test reads its own work as
+# a clash and allocates `themes/default-2` beside `themes/default`. One record,
+# consulted by everything that mirrors, cannot make that mistake.
+stage_mirror_alloc() {  # stage_mirror_alloc <source-dir> <staged-dir>
+	_smc_src=$1
+	_smc_out=$2
+	_smc_rec="$_smc_out/.mirror.map"
+
+	# Already allocated? Then it keeps the path it was given.
+	if [ -f "$_smc_rec" ]; then
+		_smc_hit=$(while IFS="$(printf '\t')" read -r _s _m || [ -n "$_s" ]; do
+			if [ "$_s" = "$_smc_src" ]; then printf '%s' "$_m"; break; fi
+		done < "$_smc_rec")
+		if [ -n "$_smc_hit" ]; then
+			printf '%s\n' "$_smc_hit"
+			return 0
+		fi
+	else
+		: > "$_smc_rec" || return 1
+	fi
+
+	_smc_want=$(stage_mirror_path "$_smc_src") || return 1
+
+	# A genuine clash: some *other* source already holds this path.
+	_smc_try=$_smc_want
+	_smc_i=1
+	while grep -q "	$_smc_try\$" "$_smc_rec" 2>/dev/null; do
+		_smc_i=$((_smc_i + 1))
+		_smc_try="$_smc_want-$_smc_i"
+	done
+
+	printf '%s\t%s\n' "$_smc_src" "$_smc_try" >> "$_smc_rec" || return 1
+	printf '%s\n' "$_smc_try"
+	return 0
+}
+
+
+# Copy one selected object into the payload, minus what does not travel.
+#
+#   stage_mirror_object <source-dir> <staged-dir>
+#
+# Everything in <source-dir> is copied to its mirrored position under
+# input/, EXCEPT:
+#
+#   - _nopayload/ at any depth, which is the object's own machinery;
+#   - the {engines,templates,stylers} sub-axes, which are selections in their
+#     own right: a theme has one directory per engine it knows about and only
+#     the chosen one belongs in the payload.
+#
+# One object per call, deliberately -- the axes are mirrored by separate calls
+# from stage_mirror_all rather than by recursing from here. POSIX sh has no
+# locals, so a recursive call runs in this shell and overwrites every _smo_
+# variable, a loop's own iteration state included: the first sub-axis was
+# mirrored and the rest were silently skipped. Flat calls from one driver have
+# no such state to lose.
+#
+# Copy-everything rather than copy-what-is-declared, because an object's files
+# refer to each other in ways only the object's own ecosystem understands -- a
+# Mustache partial, an @import, a SYSTEM entity, an image behind a url(). The
+# alternative is a dependency scanner per ecosystem, which is what
+# template.support exists to avoid needing.
+#
+# The conf files come too, and that is the point of this function rather than
+# a side effect: with every selected object's conf file present, the payload
+# describes itself and an engine can walk it -- follow `extends` from theme to
+# theme, read `markup` from a template.conf -- instead of being told what to
+# read by a manifest that staging had to remember to write.
+stage_mirror_object() {  # stage_mirror_object <src> <out>
+	_smo_src=$1
+	_smo_out=$2
+
+	[ -d "$_smo_src" ] || return 0
+
+	_smo_rel=$(stage_mirror_alloc "$_smo_src" "$_smo_out") || return 1
+	_smo_dest="$_smo_out/input/$_smo_rel"
+	mkdir -p -- "$_smo_dest" || return 1
+
+	_smo_excl=$(stage_nopayload_list "$_smo_src") || return 1
+
+	for _smo_e in "$_smo_src"/* "$_smo_src"/.[!.]*; do
+		[ -e "$_smo_e" ] || continue
+		_smo_base=$(basename -- "$_smo_e")
+
+		# Declared not to travel. `if`, not `[ ... ] && ...`: under set -e a
+		# bare test that fails is a failing command, and not-excluded is the
+		# common case.
+		_smo_skip=0
+		for _smo_x in $_smo_excl; do
+			if [ "$_smo_base" = "$_smo_x" ]; then _smo_skip=1; break; fi
+		done
+		if [ "$_smo_skip" = 1 ]; then continue; fi
+
+		if [ -d "$_smo_e" ]; then
+			case $_smo_base in
+				# A sub-axis is a selection, not content: copying the whole of
+				# themes/classic/stylers would put every styler's CSS in the
+				# payload, and an engine walking the tree would have no way to
+				# tell which one was chosen. The caller names the selected ones
+				# and they are mirrored separately.
+				engines|templates|stylers) continue ;;
+
+				# fonts/ is staged by the font mechanism, which knows about
+				# roles, weights and acquisition and copies only the faces the
+				# merged fonts.conf actually asks for -- under a single name
+				# per face at the payload root, which is what fonts.css and
+				# fop-fonts.xconf are generated to point at. Mirroring the
+				# directory as well would ship every face a theme happens to
+				# carry, twice over, referenced by nothing.
+				fonts) continue ;;
+			esac
+			# `cp -R` of a directory that is content: a theme's assets/ or
+			# partials/ arrive by this rule.
+			cp -R -- "$_smo_e" "$_smo_dest/" || return 1
+			# An exclusion nested inside a copied subtree still does not
+			# travel: `assets/_nopayload/` is as much not-payload as the
+			# object's own. Pruned after the copy rather than filtered during
+			# it, because cp -R has no exclude and reimplementing the recursion
+			# in sh to get one would be worse than deleting afterwards.
+			for _smo_x in $_smo_excl; do
+				find "$_smo_dest/$_smo_base" -name "$_smo_x" \
+					-exec rm -rf -- {} + 2>/dev/null || :
+			done
+		elif [ -f "$_smo_e" ]; then
+			cp -- "$_smo_e" "$_smo_dest/" || return 1
+		fi
+	done
+
+	return 0
+}
+
+
+# Mirror every object this build selected.
+#
+#   stage_mirror_all <chain> <engine> <styler> <staged-dir>
+#
+# The engine, the template it names, every theme in the chain, and within each
+# theme the engine/styler/template axes that were chosen. This is what makes
+# the payload self-describing: after it, every conf file that took part in the
+# build is present, at the position it occupies in the source tree.
+#
+# Order does not matter here -- the payload records position, not sequence, and
+# the order of the cascade is recovered by the walk (a theme's `extends` names
+# its parent) rather than by anything written down.
+stage_mirror_all() {  # stage_mirror_all <chain> <engine> <styler> <out>
+	_sma_chain=$1
+	_sma_engine=$2
+	_sma_styler=$3
+	_sma_out=$4
+
+	_sma_enginedir="${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$_sma_engine"
+	stage_mirror_object "$_sma_enginedir" "$_sma_out" || return 1
+
+	# The template the engine or theme selected. template_select resolves the
+	# same value stage_template uses, so the two cannot disagree about which
+	# template the payload is for.
+	_sma_tmpl=$(template_select "$_sma_chain" "$_sma_engine" "$_sma_styler" \
+		"$_sma_enginedir") || return 1
+	if [ -n "$_sma_tmpl" ]; then
+		stage_mirror_object "$_sma_tmpl" "$_sma_out" || return 1
+	fi
+
+	# Every theme in the chain, with its selected axes. A theme that
+	# contributes no stylesheet is mirrored too -- it still carries the
+	# `extends` an engine follows, and leaving it out puts a hole in the walk.
+	# Each theme, then each axis that theme selected -- flat calls rather than
+	# a recursion, for the scope reason given on stage_mirror_object. The axis
+	# directories are named here because "which engine, which styler" is this
+	# function's argument list, not something an object can work out about
+	# itself.
+	printf '%s\n' "$_sma_chain" | while IFS= read -r _sma_dir || [ -n "$_sma_dir" ]; do
+		[ -n "$_sma_dir" ] || continue
+		stage_mirror_object "$_sma_dir" "$_sma_out" || exit 1
+		for _sma_axis in "engines/$_sma_engine" "stylers/$_sma_styler"; do
+			[ -d "$_sma_dir/$_sma_axis" ] || continue
+			stage_mirror_object "$_sma_dir/$_sma_axis" "$_sma_out" || exit 1
+		done
+	done || return 1
+
 	return 0
 }
 

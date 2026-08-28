@@ -222,7 +222,7 @@ default), plus the wrapper itself in `$PDFULATOR_BIN` (`~/.local/bin`):
 | `lib/`, `theme/` | The command's shared layer | small |
 | `themes/<name>/` | The bundled themes, and any you add | ~3MB |
 | `engines/<id>/` | One converter each — see `--list-engines` | small |
-| `engines/<id>/node_modules/` | An engine's dependencies, if it has any | ~30MB |
+| `engines/<id>/_nopayload/` | The engine's own program, dependencies included | ~30MB |
 | `fonts/` | Fonts a theme downloaded, shared between themes | varies |
 | `cache/` | Themes prepared for an engine; rebuilt when needed | small |
 | `bun/` | Private _bun_, only if you asked for one | ~60MB |
@@ -326,6 +326,7 @@ my_theme/
   stylers/vivliostyle/          styling for a particular renderer
   stylers/pagedjs/
   engines/pandoc-xslt/          ...or for one specific engine
+  _nopayload/                   anything that should NOT be handed to an engine
 ```
 
 A stylesheet can be called anything, as long as `theme.conf` names it — see
@@ -338,6 +339,19 @@ references keep working.
 
 Everything is optional. A theme is data throughout — nothing in it is ever
 executed, which matters because themes are meant to be shared.
+
+Everything in a theme is copied into the bundle an engine receives, so that a
+file referring to another one finds it. If a theme carries something that
+should stay behind — the sources an asset was generated from, notes, a build
+directory — put it in `_nopayload/`, or name it in `theme.conf`:
+
+```
+do.not.payload = +src              excluded as well as _nopayload/
+do.not.payload = src               excluded instead of it
+```
+
+The bundle is mounted into containers and will be sent to remote machines, so
+what a theme leaves out is worth as much thought as what it puts in.
 
 **Themes extend other themes.** `theme.conf` names a parent:
 

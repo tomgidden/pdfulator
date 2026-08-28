@@ -64,7 +64,7 @@ docker-watch:
 # which live above the engine directory.
 
 build:
-	docker build -f engines/$(DOCKER_ENGINE)/Dockerfile -t $(TAG) .
+	docker build -f engines/$(DOCKER_ENGINE)/_nopayload/Dockerfile -t $(TAG) .
 
 # Each container engine's image, one after another. Step 9 turns this into a
 # CI matrix; this is the local equivalent.
@@ -72,13 +72,13 @@ build-all:
 	@for e in $(DOCKER_ENGINES); do \
 		tag=$$(sed -n 's/^image=//p' engines/$$e/engine.conf | head -1); \
 		echo "==> $$e ($$tag)"; \
-		docker build -f engines/$$e/Dockerfile -t "$$tag" . || exit 1; \
+		docker build -f engines/$$e/_nopayload/Dockerfile -t "$$tag" . || exit 1; \
 	done
 
 release:
 	docker buildx build --push \
 		--platform linux/arm64,linux/amd64 \
-		-f engines/$(DOCKER_ENGINE)/Dockerfile \
+		-f engines/$(DOCKER_ENGINE)/_nopayload/Dockerfile \
 		--tag $(TAG) .
 
 # Distribution tarball
@@ -166,6 +166,7 @@ test-lib:
 	sh tests/stylingmatrix.sh
 	sh tests/fontmatrix.sh
 	sh tests/stagematrix.sh
+	sh tests/payloadmatrix.sh
 	sh tests/sourcematrix.sh
 	sh tests/browsermatrix.sh
 	sh tests/watchmatrix.sh

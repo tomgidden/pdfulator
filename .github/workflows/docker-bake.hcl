@@ -32,7 +32,7 @@ group "default" {
 target "image" {
   inherits   = ["docker-metadata-action"]
   context    = "."
-  dockerfile = "engines/${ENGINE}/Dockerfile"
+  dockerfile = "engines/${ENGINE}/_nopayload/Dockerfile"
 }
 
 target "image-local" {

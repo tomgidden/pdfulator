@@ -14,7 +14,16 @@
 set -eu
 
 ENGINE_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
-MAIN="$ENGINE_DIR/main.js"
+
+# _nopayload/ is the engine's program: what it RUNS, as opposed to the
+# engine.conf and any content it declares, which are what the payload carries.
+# Keeping the two apart is what lets staging copy a whole engine directory into
+# a payload without dragging node_modules into a container mount.
+#
+# `convert` and `engine.conf` stay at the root: they are the engine's contract
+# with the wrapper, which finds them by name.
+RUN_DIR="$ENGINE_DIR/_nopayload"
+MAIN="$RUN_DIR/main.js"
 
 [ -f "$MAIN" ] || {
 	echo "vivlio: engine is incomplete: no main.js at $MAIN" >&2
@@ -24,8 +33,8 @@ MAIN="$ENGINE_DIR/main.js"
 # node_modules is the engine's own, not the distribution's: the viewer and
 # puppeteer-core are what make this engine what it is, and an engine that
 # doesn't drive a browser ships none of it.
-[ -d "$ENGINE_DIR/node_modules" ] || {
-	echo "vivlio: engine dependencies are missing ($ENGINE_DIR/node_modules)." >&2
+[ -d "$RUN_DIR/node_modules" ] || {
+	echo "vivlio: engine dependencies are missing ($RUN_DIR/node_modules)." >&2
 	echo "Run \`pdfulator --install\` to complete the installation." >&2
 	exit 1
 }

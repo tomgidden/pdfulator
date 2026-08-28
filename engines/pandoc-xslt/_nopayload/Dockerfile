@@ -73,7 +73,7 @@ RUN set -eu; \
 # is mounted, and the wrapper generates the FOP configuration that names them
 # (see fonts_fop_xconf and the fop-fonts.xconf that `render` prefers).
 COPY engines/pandoc-xslt/xsl        /engine/xsl
-COPY engines/pandoc-xslt/metadata.lua /engine/metadata.lua
+COPY engines/pandoc-xslt/_nopayload/metadata.lua /engine/metadata.lua
 
 # The built-in theme, so the image works with no mounts at all.
 # The fallback theme, for a run that supplies none. Normally the wrapper
@@ -86,7 +86,7 @@ COPY themes/default /theme
 # -- is invisible from bare `docker run`, which uses the image's own user.
 RUN mkdir -p /in /out /work && chmod 1777 /work
 
-COPY --chmod=755 engines/pandoc-xslt/render /usr/local/bin/render
+COPY --chmod=755 engines/pandoc-xslt/_nopayload/render /usr/local/bin/render
 
 WORKDIR /work
 
