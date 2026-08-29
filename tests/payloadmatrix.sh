@@ -277,6 +277,20 @@ done
 # differ: with two themes, or one axis, both orders give the same answer and
 # the test would pass against a wrong implementation.
 
+# THIS SECTION IS LOAD-BEARING. It is the only check that lib/styling.sh and
+# engines/vivlio/_nopayload/payload.js still agree, and a divergence between
+# them raises no error anywhere -- it renders a document whose stylesheets
+# apply in the wrong order, which only an eye catches.
+#
+# Three properties of the fixture below are load-bearing too, and each was
+# added because a mutation survived without it. Do not simplify any of them:
+#
+#   three themes deep      with two, the settled axis-outer order and the
+#                          rejected chain-outer order give the same answer
+#   two sheets per object   with one, `+`-adds and bare-replaces agree
+#   the engine declares     without it the level-5 band is untested -- which is
+#     a stylesheet          exactly how styling_list came to omit it while
+#                           payload.js emitted it, undetected
 section "the shell and the engine agree"
 
 if ! command -v bun >/dev/null 2>&1; then
@@ -284,7 +298,14 @@ if ! command -v bun >/dev/null 2>&1; then
 else
 	C="$BASE/cascade"
 	mkdir -p "$C/engines/eng" "$C/templates/tmpl"
-	printf 'id=eng\ntemplate=tmpl\nstyler=sty\n' > "$C/engines/eng/engine.conf"
+	# The engine declares a stylesheet. No SHIPPED engine does, which is
+	# precisely why the fixture must: without it the engine band is untested,
+	# and an implementation that omits the band entirely passes. That is not
+	# hypothetical -- lib/styling.sh omitted it while payload.js did not, and
+	# this comparison stayed green throughout.
+	printf 'id=eng\ntemplate=tmpl\nstyler=sty\ntemplate.styling = +./engine.css\n' \
+		> "$C/engines/eng/engine.conf"
+	printf '/* engine */\n' > "$C/engines/eng/engine.css"
 	printf 'template.structure = ./markup.html\n' > "$C/templates/tmpl/template.conf"
 	printf '<html></html>\n' > "$C/templates/tmpl/markup.html"
 
@@ -321,7 +342,7 @@ else
 		done | tr '\n' ' ' | sed 's/ $//')
 
 	ok "the shell resolves axis-outer, chain-inner" \
-	   "base.css base-extra.css mid.css mid-extra.css leaf.css leaf-extra.css base-sty.css mid-sty.css leaf-sty.css" "$SH"
+	   "engine.css base.css base-extra.css mid.css mid-extra.css leaf.css leaf-extra.css base-sty.css mid-sty.css leaf-sty.css" "$SH"
 
 	# Stage it, then ask the JS reader the same question of the result.
 	P2="$BASE/cascade-payload"
@@ -351,22 +372,21 @@ JSEOF
 	ok "and finds the declared markup, not a fixed name" "markup.html" \
 	   "$(printf '%s\n' "$JS" | sed -n 3p)"
 
-	# And the third implementation: _lib/payload.sh, which is what a
-	# containerised engine runs. It ships INSIDE the payload precisely so that
-	# it cannot be a different revision from the wrapper that built it -- but
-	# that guarantee is about packaging, and says nothing about whether the
-	# code agrees. This is where that is checked.
+	# --- and the payload's own reader ---------------------------------------
+	#
+	# _lib/payload.sh is what a containerised engine runs. It answers `markup`
+	# and `engine` only: it does NOT resolve the cascade, because both pandoc
+	# engines link the print.css the wrapper already produced, so a third
+	# implementation of the §5 order would have had no consumer. It had one
+	# briefly, and it had already drifted -- omitting the engine band -- with
+	# this very comparison unable to see it, because no fixture engine declared
+	# a stylesheet. Hence the engine sheet above.
+	#
 	# PDFULATOR_LIB, because PDFULATOR_DIR points at the fixture root here and
 	# the reader being tested is the repository's.
 	PDFULATOR_LIB="$REPO/lib" stage_lib "$P2" || :
-	SH2=$(sh "$P2/_lib/payload.sh" stylesheets "$P2" |
-		while IFS= read -r _f || [ -n "$_f" ]; do
-			[ -n "$_f" ] || continue
-			basename -- "$_f"
-		done | tr '\n' ' ' | sed 's/ $//')
 
-	ok "the payload's own reader agrees too" "$SH" "$SH2"
-	ok "and finds the same markup" "markup.html" \
+	ok "the payload's reader finds the same markup" "markup.html" \
 	   "$(basename -- "$(sh "$P2/_lib/payload.sh" markup "$P2")")"
 	ok "and reads the engine and styler" "eng sty" \
 	   "$(sh "$P2/_lib/payload.sh" engine "$P2")"
@@ -374,8 +394,16 @@ JSEOF
 	# Paths are printed RELATIVE to the payload, so an engine that sees it
 	# through a container mount at /payload can use them unchanged. An absolute
 	# path here would name a directory that does not exist inside the container.
-	ok "paths are relative to the payload" "no" \
-	   "$(sh "$P2/_lib/payload.sh" stylesheets "$P2" | grep -q '^/' && echo yes || echo no)"
+	# This is a deliberate interface DIFFERENCE from payload.js, which returns
+	# absolute paths because its caller shares its process.
+	ok "and prints paths relative to the payload" "no" \
+	   "$(sh "$P2/_lib/payload.sh" markup "$P2" | grep -q '^/' && echo yes || echo no)"
+
+	# The removed command is named rather than silently unknown, so a caller
+	# written against an older payload is told what happened.
+	ok "the removed stylesheets command explains itself" "yes" \
+	   "$(sh "$P2/_lib/payload.sh" stylesheets "$P2" 2>&1 |
+	      grep -q 'wrapper resolves the cascade' && echo yes || echo no)"
 fi
 
 

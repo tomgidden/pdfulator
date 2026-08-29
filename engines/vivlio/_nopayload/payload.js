@@ -23,6 +23,44 @@
 // its own id and its styler; it can see the mirrored tree; and a theme's
 // `extends` names its parent. That is everything needed to reconstruct §5's
 // order, so nothing has to be recorded -- and nothing can go stale.
+//
+// --- A SECOND IMPLEMENTATION EXISTS. READ THIS BEFORE EDITING ----------------
+//
+// lib/payload/payload.sh answers two of these same questions in POSIX sh, for
+// engines that run inside a container where no JS runtime is present. It is
+// staged into every payload at _lib/. Two implementations exist because the
+// two live on opposite sides of a language boundary and neither can call the
+// other.
+//
+//     payload.js         payload.sh      what it answers      duplicated?
+//     ---------------    ------------    ------------------   -------------
+//     templateDir()      p_template      which template dir   YES
+//     engineOf()         p_engine        engine and styler    YES
+//     markup()           cmd_markup      the structural file  YES
+//     readConf/confGet   conf.sh         the conf grammar     YES (via sh)
+//     stylesheets()      --              the §5 cascade       no: see below
+//
+// **stylesheets() IS NOT DUPLICATED.** payload.sh had a `stylesheets` command
+// and it was removed unused: both pandoc engines link the `print.css` that the
+// WRAPPER concatenated (lib/styling.sh), so nothing ever called it. What it
+// left behind was a third implementation of §5's order with no consumer, and
+// it had already drifted -- omitting the engine band this file emits -- with
+// the comparison test unable to see it. So the cascade order lives in exactly
+// two places: HERE, and lib/styling.sh.
+//
+// **THE ONE THAT MATTERS: this file and lib/styling.sh must agree.** The
+// wrapper resolves the cascade to build print.css; this file resolves it again
+// to emit <link>s. They are checked against each other by
+// tests/payloadmatrix.sh, over a fixture that must stay three themes deep,
+// with two sheets per object, and with the fixture engine declaring a
+// stylesheet -- each of those three properties is load-bearing, and each was
+// added because a mutation survived without it. A divergence between them does
+// not raise an error: it renders a document with the wrong stylesheet order,
+// which only an eye catches.
+//
+// A change to any function marked "duplicated" above obliges a matching change
+// in payload.sh, and vice versa. Each side carries comments naming the other's
+// corresponding statements.
 
 import fs from 'fs';
 import path from 'path';
@@ -171,8 +209,14 @@ function themeChain(payload) {
 // `vivlio-docker` run the same code from the same file, so the id cannot be a
 // constant here, and a future engine sharing this renderer would be wrong
 // again in the same way.
+// sh: p_engine -- which returns "<id> <styler>" on one line, because that is
+// what a shell caller can split.
 export function engineOf(payload) {
+  // sh: _pe_dir="$1/input/engines"
   const dir = path.join(payload, INPUT, 'engines');
+
+  // sh: [ -d "$_pe_dir" ] || return 0 -- an absent directory is empty, not an
+  // error.
   let names;
   try {
     names = fs.readdirSync(dir).filter(n => isDir(path.join(dir, n)));
@@ -181,7 +225,15 @@ export function engineOf(payload) {
   }
   if (!names.length) return { id: '', styler: '' };
 
+  // sh: _pe_id=$(basename -- "$_pe") on the first iteration.
+  // The FIRST entry, not a search: staging copies the chosen engine and no
+  // other, so there is exactly one. Both sides rely on that same fact rather
+  // than on agreeing about how to pick among several.
   const id = names[0];
+
+  // sh: conf_get "$_pe/engine.conf" styler
+  // Read rather than assumed: vivlio and vivlio-docker run this same file with
+  // different ids and the same styler, so neither can be a constant.
   return { id, styler: confGet(path.join(dir, id, 'engine.conf'), 'styler') };
 }
 
@@ -191,14 +243,21 @@ export function engineOf(payload) {
 // There is exactly one -- staging copies the selected template and no other --
 // so it is found rather than named. An engine with no template concept has
 // none, and gets ''.
+// sh: p_template
 function templateDir(payload) {
+  // sh: _pt_dir="$1/input/templates"
   const dir = path.join(payload, INPUT, 'templates');
+
+  // sh: [ -d "$_pt_dir" ] || return 0
   let names;
   try {
     names = fs.readdirSync(dir).filter(n => isDir(path.join(dir, n)));
   } catch {
     return '';
   }
+
+  // sh: the first matching iteration of `for _pt in "$_pt_dir"/*`.
+  // Same single-entry reliance as engineOf.
   return names.length ? path.join(dir, names[0]) : '';
 }
 
@@ -210,14 +269,30 @@ function templateDir(payload) {
 // Returns '' when the payload names none, which is not an error -- an engine
 // run against a directory nobody staged falls back to its own built-in, and
 // that is the whole point of the contract being paths and nothing else.
+// sh: cmd_markup -- with one deliberate interface difference: that side prints
+// a path RELATIVE to the payload (via p_rel), because its caller is inside a
+// container where the payload's absolute host path names nothing. This side
+// returns an absolute path and main.js makes it relative at the point of use,
+// in linkTags's href. Same question, different frame of reference.
 export function markup(payload) {
+  // sh: _cm_t=$(p_template "$1"); [ -n "$_cm_t" ] || return 0
   const tdir = templateDir(payload);
   if (!tdir) return '';
 
+  // sh: conf_get "$_cm_t/template.conf" template.structure
   const ref = confGet(path.join(tdir, 'template.conf'), 'template.structure');
   if (!ref) return '';
 
+  // sh: the `case $_cm_ref in /*) ... esac` join.
+  // resolveRef also strips a leading `+`; the shell side does not, because
+  // template.structure is a single value rather than a list and `+` has no
+  // meaning on one. If that ever changes, both sides change together.
   const file = resolveRef(ref, tdir);
+
+  // sh: [ -f "$_cm_f" ] || return 0
+  // A declared-but-missing structural file is empty, not an error: the caller
+  // falls back to its own built-in, which is what a bare `docker run` with
+  // nothing mounted gets.
   return fs.existsSync(file) ? file : '';
 }
 
@@ -270,17 +345,64 @@ function sheetsOf(dir) {
 //
 // The inversion is invisible with a two-level chain, which is how the old
 // implementation survived a year -- it takes three themes to show.
+// THIS IS THE FUNCTION THAT MUST AGREE WITH lib/styling.sh's styling_list.
+//
+// Not a translation of it -- the two work from different inputs, and that is
+// the point rather than an accident:
+//
+//     styling_list   resolves from the SOURCE tree, before staging, and emits
+//                    (level, path) pairs the stager turns into print.css.
+//     stylesheets    resolves from the PAYLOAD, after staging, by walking the
+//                    mirror the stager built.
+//
+// Same rule, two vantage points. Neither can be derived from the other, which
+// is why both exist; tests/payloadmatrix.sh asserts they produce the same
+// list, and that test is the only thing standing between an edit here and a
+// document whose stylesheets apply in the wrong order.
+//
+// The bands correspond one-to-one with styling_list's numbered levels:
+//
+//     level  styling_list                          here
+//     -----  -----------------------------------   ---------------------------
+//        5   engine.conf's template.styling        sheetsOf(engineDir)
+//       10   template.conf's template.styling      sheetsOf(tdir)
+//       20   styling_axis "" theme.conf            sub === ''
+//       30   styling_axis engines/<id>             sub === `engines/<id>`
+//       40   styling_axis stylers/<s>              sub === `stylers/<s>`
+//       50   (neither: the document -- see below)
+//       60   the --css argument                    externalSheets()
+//
+// **Level 50 is produced by NEITHER.** It is the document's own YAML, and the
+// wrapper cannot extract it: knowing which YAML block is frontmatter needs a
+// real Markdown parser, and this repo's own README would defeat a naive one.
+// An engine that wants it splices it in itself, between 40 and 60.
+//
+// **Adding a level means editing BOTH, plus STYLING_LEVELS in lib/styling.sh.**
+// A level present in one and absent from the other is invisible until someone
+// declares it -- which is exactly how the engine band (5) came to exist here
+// and not there, and stayed that way because no fixture engine declared a
+// stylesheet.
 export function stylesheets(payload, engineId, styler) {
   const chain = themeChain(payload);
   const out = [];
 
+  // Level 5: the engine's own sheet. The bottom of the cascade, below even the
+  // template: an engine's sheet is the most general statement there is.
+  // styling_list: the `conf_get_all "$_sl_enginedir/engine.conf"` block.
   const engineDir = objectDir(payload, 'engines', engineId);
   if (isDir(engineDir)) out.push(...sheetsOf(engineDir));
 
+  // Level 10: the template's own sheet -- the floor a theme is written
+  // against. If it came after the theme's, no theme could restyle anything the
+  // template had an opinion about without specificity hacks.
+  // styling_list: the `conf_get_all "$_sl_tdir/template.conf"` block.
   const tdir = templateDir(payload);
   if (tdir) out.push(...sheetsOf(tdir));
 
-  // One pass per axis, each pass walking the whole chain root-first.
+  // Levels 20/30/40: one pass per axis, each pass walking the whole chain
+  // root-first. AXIS OUTER, CHAIN INNER -- this loop nesting IS the rule, and
+  // transposing the two `for`s silently produces the rejected order.
+  // styling_list: the three consecutive styling_axis calls.
   for (const sub of ['', `engines/${engineId}`, `stylers/${styler}`]) {
     for (const themeDir of chain) {
       const dir = sub ? path.join(themeDir, sub) : themeDir;
@@ -288,11 +410,12 @@ export function stylesheets(payload, engineId, styler) {
     }
   }
 
-  // --css, the highest level, staged under external/ because the user may
-  // point it at any file on the disk and a path from their home has no place
-  // in a directory that gets mounted or shipped. It has no conf file to
-  // declare it -- it is not an object -- so it is picked up by position, which
-  // is the same "the tree says it" rule as everything above.
+  // Level 60: --css, the highest. styling_list takes it as an argument and
+  // emits it directly; here it is found by POSITION, under external/, because
+  // by this point it is a staged file like any other and has no conf file to
+  // declare it -- it is not an object. Staged under external/ because the user
+  // may point it at any file on the disk, and a path from their home has no
+  // place in a directory that gets mounted or shipped.
   out.push(...externalSheets(payload));
 
   return out;

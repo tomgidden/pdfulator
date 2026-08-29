@@ -31,6 +31,42 @@
 # styles like a browser, which is exactly the assumption that put a Mustache
 # template into pandoc.
 #
+# --- A SECOND IMPLEMENTATION EXISTS. READ THIS BEFORE EDITING ----------------
+#
+# engines/vivlio/_nopayload/payload.js resolves this same cascade a second
+# time. Not a translation of this file -- the two work from different inputs,
+# and that is the point rather than an accident:
+#
+#     styling_list (here)   resolves from the SOURCE tree, BEFORE staging, and
+#                           emits (level, path) pairs that the stager turns
+#                           into print.css.
+#     stylesheets() (JS)    resolves from the PAYLOAD, AFTER staging, by
+#                           walking the mirror the stager built, so it can emit
+#                           a <link> per sheet instead of one for print.css.
+#
+# Same rule, two vantage points; neither derivable from the other, which is why
+# both exist. tests/payloadmatrix.sh runs both over one fixture and asserts
+# they produce the same list. **A divergence raises no error** -- it renders a
+# document whose stylesheets apply in the wrong order, which only an eye
+# catches. That test is the whole safety net.
+#
+# Its fixture must stay three themes deep, with two sheets per object, and with
+# the fixture engine declaring a stylesheet. Each of those three is
+# load-bearing and each was added because a mutation survived without it: with
+# two themes the settled and rejected orders agree; with one sheet per object
+# `+`-adds and bare-replaces agree; and without an engine sheet the level-5
+# band is untested -- which is exactly how this file came to omit it while the
+# JS side emitted it.
+#
+# ADDING OR REORDERING A LEVEL MEANS EDITING BOTH, plus STYLING_LEVELS below.
+# The JS side carries the level-by-level correspondence table.
+#
+# (lib/payload/payload.sh, staged into every payload, deliberately does NOT
+# resolve the cascade: both pandoc engines link the print.css this file's
+# output produced. It answers `markup` and `engine` only. A third
+# implementation existed there briefly, had no consumer, and had already
+# drifted before it was removed.)
+#
 # Requires lib/conf.sh, lib/paths.sh, lib/theme.sh and lib/template.sh.
 
 
@@ -39,7 +75,9 @@
 # 40 means. Spaced by tens so a level can be inserted between two of these
 # without renumbering the ones either side -- and something will want to: a
 # per-document sidecar and a project .pdfulator.conf are both already sketched.
-STYLING_LEVELS="10:template 20:theme 30:theme-engine 40:theme-styler \
+# 5 rather than 0 for the engine, because 0 reads like "unset" in a numeric
+# field and because something may yet want to sit below it.
+STYLING_LEVELS="5:engine 10:template 20:theme 30:theme-engine 40:theme-styler \
                 50:document 60:command-line"
 
 
@@ -239,6 +277,25 @@ styling_list() {  # styling_list <chain> <engine> <styler> <engine-dir> [css]
 	_sl_styler=$3
 	_sl_enginedir=$4
 	_sl_css=${5:-}
+
+	# --- 5: the engine's own styling ------------------------------------------
+	#
+	# The bottom of the cascade, below even the template: an engine's sheet is
+	# the most general statement there is, and everything else refines it.
+	#
+	# No shipped engine declares one, which is exactly why this was missing for
+	# a while and why nothing caught it -- the shell produced no engine band,
+	# payload.js did, and the two agreed on every payload anyone had built. A
+	# stylesheet silently absent under one engine and present under another is
+	# the failure that was waiting.
+	if [ -n "$_sl_enginedir" ] && [ -f "$_sl_enginedir/engine.conf" ]; then
+		conf_get_all "$_sl_enginedir/engine.conf" template.styling | \
+		while IFS= read -r _sl_v || [ -n "$_sl_v" ]; do
+			[ -n "$_sl_v" ] || continue
+			_sl_f=$(styling_resolve "$_sl_v" "$_sl_enginedir") || exit 1
+			[ -n "$_sl_f" ] && printf '5\t%s\n' "$_sl_f"
+		done || return 1
+	fi
 
 	# --- 10: the template's own styling ---------------------------------------
 	#
