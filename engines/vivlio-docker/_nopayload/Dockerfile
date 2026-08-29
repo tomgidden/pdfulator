@@ -52,16 +52,22 @@ RUN bun install --frozen-lockfile
 # themes/ so a `--theme classic` works inside the image too; theme/ is the
 # fallback for a run that supplies none, and is themes/default.
 #
-# The template is copied in on top of that fallback theme. themes/default no
-# longer carries one -- it moved to templates/html-mustache-vivlio, so that a
-# template can be selected by ecosystem rather than by filename -- and without
-# this a bare `docker run` with no mounts would fall back to main.js's minimal
-# built-in rather than the real template.
+# The built-in fallback for a bare `docker run` with no mounts. It is NOT a
+# payload -- nothing staged it, so it has no input/ mirror and no conf files to
+# walk -- which means the engine falls back to its own minimal template, as the
+# contract says it should when handed a directory nobody prepared.
+#
+# themes/ and templates/ are copied whole so that `--theme` inside the
+# container can name any shipped theme.
 COPY themes         ./themes
 COPY templates      ./templates
 COPY themes/default ./theme
-COPY templates/html-mustache-vivlio/article.tmpl ./theme/article.tmpl
-COPY engines/vivlio/_nopayload/main.js ./
+
+# The engine: main.js and the modules it imports. payload.js reads a staged
+# payload's conf files, and is a separate file rather than part of main.js
+# because it is the one piece a future engine in this ecosystem would share.
+COPY engines/vivlio/_nopayload/main.js    ./
+COPY engines/vivlio/_nopayload/payload.js ./
 
 # Where the wrapper mounts things. Created here, and owned by the runtime user,
 # so that a container writing an output file into /out can do so without the

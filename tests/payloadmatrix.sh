@@ -263,6 +263,96 @@ for _e in "$REPO"/engines/*/; do
 done
 
 
+# --- The two readers agree -------------------------------------------------
+#
+# lib/styling.sh resolves the cascade in sh; engines/vivlio/_nopayload/
+# payload.js resolves it again in JS, by walking the payload the shell staged.
+# Two implementations of one rule is a standing invitation to drift, and drift
+# here does not raise an error -- it renders a document with the wrong
+# stylesheet order, which only an eye catches.
+#
+# So the check is that they produce the SAME LIST for the same inputs. The
+# fixture is three themes deep with two populated axes, because that is the
+# shape where the settled axis-outer order and the rejected chain-outer order
+# differ: with two themes, or one axis, both orders give the same answer and
+# the test would pass against a wrong implementation.
+
+section "the shell and the engine agree"
+
+if ! command -v bun >/dev/null 2>&1; then
+	printf 'skip  no bun; cannot run the JS reader\n'
+else
+	C="$BASE/cascade"
+	mkdir -p "$C/engines/eng" "$C/templates/tmpl"
+	printf 'id=eng\ntemplate=tmpl\nstyler=sty\n' > "$C/engines/eng/engine.conf"
+	printf 'template.structure = ./markup.html\n' > "$C/templates/tmpl/template.conf"
+	printf '<html></html>\n' > "$C/templates/tmpl/markup.html"
+
+	prev=""
+	for t in base mid leaf; do
+		mkdir -p "$C/themes/$t/stylers/sty"
+		{
+			printf 'name = %s\n' "$t"
+			[ -n "$prev" ] && printf 'extends = %s/themes/%s\n' "$C" "$prev"
+			printf 'template.styling = +./%s.css\n' "$t"
+		} > "$C/themes/$t/theme.conf"
+		printf '/* %s */\n' "$t" > "$C/themes/$t/$t.css"
+		# A SECOND sheet on the same object, so that `+` adding and a bare
+		# value replacing are distinguishable. With one sheet per object both
+		# readings give the same list, and a reader that ignored `+` entirely
+		# would pass.
+		printf 'template.styling = +./%s-extra.css\n' "$t" \
+			>> "$C/themes/$t/theme.conf"
+		printf '/* %s extra */\n' "$t" > "$C/themes/$t/$t-extra.css"
+		printf 'template.styling = +./%s-sty.css\n' "$t" \
+			> "$C/themes/$t/stylers/sty/theme-styler.conf"
+		printf '/* %s sty */\n' "$t" > "$C/themes/$t/stylers/sty/$t-sty.css"
+		prev=$t
+	done
+
+	CHAIN=$(PDFULATOR_DIR="$C" TEMPLATES_DIR="$C/templates" theme_chain "$C/themes/leaf")
+
+	# The shell's answer: basenames, in cascade order.
+	SH=$(PDFULATOR_DIR="$C" TEMPLATES_DIR="$C/templates" ENGINES_DIR="$C/engines" \
+		styling_list "$CHAIN" eng sty "$C/engines/eng" "" |
+		while IFS="$(printf '\t')" read -r _l _f || [ -n "$_l" ]; do
+			[ -n "$_f" ] || continue
+			basename -- "$_f"
+		done | tr '\n' ' ' | sed 's/ $//')
+
+	ok "the shell resolves axis-outer, chain-inner" \
+	   "base.css base-extra.css mid.css mid-extra.css leaf.css leaf-extra.css base-sty.css mid-sty.css leaf-sty.css" "$SH"
+
+	# Stage it, then ask the JS reader the same question of the result.
+	P2="$BASE/cascade-payload"
+	mkdir -p "$P2"
+	PDFULATOR_DIR="$C" TEMPLATES_DIR="$C/templates" ENGINES_DIR="$C/engines" \
+		stage_mirror_all "$CHAIN" eng sty "$P2" >/dev/null 2>&1
+
+	cat > "$BASE/ask.mjs" <<JSEOF
+import { stylesheets, markup, engineOf } from '$REPO/engines/vivlio/_nopayload/payload.js';
+const P = '$P2';
+const { id, styler } = engineOf(P);
+console.log([id, styler].join(' '));
+console.log(stylesheets(P, id, styler).map(s => s.split('/').pop()).join(' '));
+console.log((markup(P) || '').split('/').pop());
+JSEOF
+
+	JS=$(bun run "$BASE/ask.mjs" 2>"$BASE/ask.err")
+	ok "the JS reader runs" "0" "$?"
+
+	ok "it reads the engine and styler from the payload" "eng sty" \
+	   "$(printf '%s\n' "$JS" | sed -n 1p)"
+
+	# THE POINT OF THIS SECTION.
+	ok "and resolves the same cascade the shell did" "$SH" \
+	   "$(printf '%s\n' "$JS" | sed -n 2p)"
+
+	ok "and finds the declared markup, not a fixed name" "markup.html" \
+	   "$(printf '%s\n' "$JS" | sed -n 3p)"
+fi
+
+
 printf '\n'
 if [ "$FAIL" = 0 ]; then
 	printf 'ALL EXPECTATIONS MET\n'

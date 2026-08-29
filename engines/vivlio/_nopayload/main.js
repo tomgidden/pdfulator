@@ -43,6 +43,10 @@ import yaml from 'js-yaml';
 import Mustache from 'mustache';
 import puppeteer from 'puppeteer-core';
 
+// The payload reader: what the staged directory says it contains. Local to
+// this engine rather than a dependency -- it reads conf files and nothing else.
+import { markup, stylesheets, engineOf } from './payload.js';
+
 
 // Paths
 //
@@ -55,16 +59,18 @@ import puppeteer from 'puppeteer-core';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 
-// Used only when the theme directory has no article.tmpl, which the wrapper
-// never allows -- see buildHtml.
+// Used only when the payload names no structural file, which the wrapper never
+// allows -- see buildHtml.
+//
+// The stylesheet links are {{{stylesheets}}} here as in every template: which
+// sheets apply and in what order is the engine's answer, given once, rather
+// than a list each template has to keep in step. See buildHtml.
 const FALLBACK_TMPL = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{{title}}</title>
-  <link rel="stylesheet" href="/theme/fonts.css">
-  <link rel="stylesheet" href="/theme/print.css">
-  <link rel="stylesheet" href="/theme/logo.css">
+{{{stylesheets}}}
 </head>
 <body class="{{pdfulator_features}}">
   <article>
@@ -151,6 +157,77 @@ function formatDate(d) {
 // {{var}} — escaped, {{{var}}} — raw HTML, {{#var}}...{{/var}} — conditional/loop
 
 
+// The stylesheet links, in cascade order.
+//
+// THE ENGINE EMITS THESE, NOT THE TEMPLATE. That is the seam between the HTML
+// world and the CSS world, and it is not a workaround: reconciling a list of
+// (level, file) into a rendering is the engine's job, and for an HTML engine
+// the rendering is a run of <link> elements. An XSL-FO engine reconciles the
+// same list completely differently -- it is not additive at all -- which is the
+// check that the abstraction is in the right place.
+//
+// What this buys, concretely: ordering lives in one place. A new level, or a
+// theme naming a second stylesheet, never touches a template. Before this,
+// three <link>s were written out in every template and in this file's fallback,
+// so adding one meant editing all of them and hoping none was missed.
+//
+// WHY THE HREFS ARE ABSOLUTE. The generated HTML lives in a temp directory
+// served at /doc/, while the payload is served at /theme/ -- the document and
+// the payload are not in one tree, so a relative href cannot reach across.
+// The engine generates them, so no author ever writes the prefix. Note this
+// does NOT apply to url() inside a stylesheet: CSS resolves those against the
+// stylesheet's own URL, so a mirrored sheet finds the assets mirrored beside
+// it. That is exactly why the payload mirrors the source tree.
+// A stylesheet staged from outside any object -- --css. It is the top of the
+// cascade, so it has to stay above the generated files the payload root holds.
+function isExternal(p) {
+  return p.split(path.sep).includes('external');
+}
+
+
+function escapeAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+                  .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+// --css is NOT a parameter here. It reaches this function through the payload
+// like every other stylesheet: staging copies it in and the walk finds it at
+// the top of the cascade. Taking it as an argument would mean emitting the
+// path the user typed -- a path on the host filesystem, which the document is
+// served over HTTP and a container cannot see at all.
+function linkTags(payload) {
+  const href = p => '/theme/' + path.relative(payload, p).split(path.sep).join('/');
+  const link = h => `  <link rel="stylesheet" href="${escapeAttr(h)}">`;
+
+  const out = [];
+
+  // Fonts first and unconditionally: it is generated at the payload root, it
+  // declares @font-face and the --pdfulator-<role> properties, and every sheet
+  // below may refer to them.
+  if (fs.existsSync(path.join(payload, 'fonts.css'))) out.push(link('/theme/fonts.css'));
+
+  // Which engine and styler, read from the payload rather than passed in: the
+  // contract is three paths, and `vivlio` and `vivlio-docker` run this same
+  // file, so neither can be a constant here.
+  const { id, styler } = engineOf(payload);
+  const sheets = stylesheets(payload, id, styler);
+
+  // Generated at the payload root from theme.conf's logo.* keys. It belongs
+  // after the themes that declared it -- but BEFORE --css, which is the user's
+  // last word and must be able to override a theme's logo rule like anything
+  // else. So it is spliced in ahead of the external band rather than appended.
+  const external = sheets.filter(isExternal);
+  const declared = sheets.filter(s => !isExternal(s));
+
+  for (const sheet of declared) out.push(link(href(sheet)));
+  if (fs.existsSync(path.join(payload, 'logo.css'))) out.push(link('/theme/logo.css'));
+  for (const sheet of external) out.push(link(href(sheet)));
+
+  return out.join('\n');
+}
+
+
 function buildHtml(mdSource, inputBase, themeDir, extraCss) {
   const sidecar = loadSidecar(inputBase);
   const { meta: docMeta, body: rawBody } = parseFrontMatter(mdSource);
@@ -185,17 +262,21 @@ function buildHtml(mdSource, inputBase, themeDir, extraCss) {
 
   const renderedBody = md.render(body);
 
-  // The template normally comes from the staged directory: themes/default
-  // supplies one and every other theme inherits it through the cascade.
+  // The structural file, named by the payload's own template.conf rather than
+  // looked for under an agreed filename. `article.tmpl` at the payload root was
+  // a leftover from when the staged directory WAS the theme, and it is the
+  // by-name coupling that once let a Mustache template reach pandoc: staging
+  // the right file under the expected name fixed the symptom but left every
+  // ecosystem obliged to agree on a name.
   //
-  // FALLBACK_TMPL is for the engine run on its own, against a theme directory
-  // nobody staged -- which its own test does, and which is the whole point of
-  // the engine contract being three paths and nothing else. It is deliberately
-  // the minimum that produces a readable page, not a copy of the real
-  // template: an engine carrying a second opinion about how a document should
-  // look is how defaults/ and the pandoc engine drifted apart.
-  const tmplPath = path.join(themeDir, 'article.tmpl');
-  const tmpl = fs.existsSync(tmplPath)
+  // FALLBACK_TMPL is for the engine run on its own, against a directory nobody
+  // staged -- which its own test does, and which is the whole point of the
+  // engine contract being three paths and nothing else. It is deliberately the
+  // minimum that produces a readable page, not a copy of the real template: an
+  // engine carrying a second opinion about how a document should look is how
+  // defaults/ and the pandoc engine drifted apart.
+  const tmplPath = markup(themeDir);
+  const tmpl = tmplPath
     ? fs.readFileSync(tmplPath, 'utf8')
     : FALLBACK_TMPL;
 
@@ -210,6 +291,7 @@ function buildHtml(mdSource, inputBase, themeDir, extraCss) {
     authors: normaliseAuthors(meta.authors || meta.author),
     date: formatDate(meta.date),
     css: extraCss || meta.css || '',
+    stylesheets: linkTags(themeDir),
     pdfulator_features: meta.pdfulator_features || '',
   };
 
