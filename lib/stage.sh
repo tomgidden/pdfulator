@@ -554,24 +554,25 @@ stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
 		_sy_rel=$(stage_mirror_alloc "$_sy_src" "$_sy_out") || return 1
 		mkdir -p -- "$_sy_out/input/$_sy_rel" || return 1
 
-		# The stylesheet's siblings come too, so relative url() keeps working.
-		# Files only, and not the whole subtree: fonts/ is staged separately by
-		# a mechanism that knows about acquisition, and copying a theme's
-		# entire directory would drag in its .git and every source asset it was
-		# built from.
+		# NO SIBLING COPY HERE. An earlier version copied every file beside a
+		# stylesheet so that relative url() kept working. Mirroring whole
+		# objects made that redundant for anything a theme, engine or template
+		# declares -- their directories arrive complete -- and left it actively
+		# harmful for the one case it did not cover: --css names a file
+		# ANYWHERE on the disk, so "copy its siblings" meant copying the
+		# user's whole directory into the payload. Pointing --css at a file in
+		# a working directory shipped two dozen unrelated PDFs and shell
+		# scripts into a bundle that gets mounted into containers.
 		#
-		# Still needed alongside the object mirror, because a stylesheet may be
-		# named from outside any selected object -- most obviously --css, which
-		# points at a file anywhere on the disk.
-		for _sy_sib in "$_sy_src"/*; do
-			[ -f "$_sy_sib" ] || continue
-			cp -- "$_sy_sib" "$_sy_out/input/$_sy_rel/" 2>/dev/null || :
-		done
+		# So a stylesheet from outside a selected object arrives alone, below.
+		# Relative url() from such a file does not resolve, which is the
+		# honest behaviour: pdfulator has no way to know what else that
+		# directory holds or whether the user meant to hand it over.
 
 		_sy_dest="input/$_sy_rel/$(basename -- "$_sy_file")"
-		# The sibling copy above will usually have placed it already; this is
-		# for a stylesheet named from outside the directory it sits in, and for
-		# --css, which is any file the user pointed at.
+		# The object mirror will usually have placed it already; this covers a
+		# stylesheet named from outside the directory it sits in, and --css,
+		# which is any file the user pointed at.
 		if [ ! -f "$_sy_out/$_sy_dest" ]; then
 			cp -- "$_sy_file" "$_sy_out/$_sy_dest" || return 1
 		fi
