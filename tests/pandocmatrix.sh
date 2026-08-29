@@ -178,15 +178,36 @@ echo "============ THEME OVERRIDES ============"
 # into the PDF as text. The wrapper now selects a template by ecosystem and
 # stages it under this name, so what is here is always pandoc's dialect.
 #
-# The assertion itself is unchanged in shape because the engine's rule is
-# unchanged -- prefer the staged copy -- and that rule was never the bug. What
-# changed is who is allowed to put a file here.
+# The property is unchanged -- the payload's template wins -- but the mechanism
+# is no longer a filename. The payload NAMES its structural file in
+# templates/<id>/template.conf and the engine asks _lib/payload.sh for it, so a
+# file merely dropped in as `article.tmpl` no longer wins anything. That is the
+# improvement: a template arrives because something declared it, not because it
+# was called the right thing.
 fixture
-printf 'staged template\n' > "$BASE/theme/article.tmpl"
+mkdir -p "$BASE/theme/_lib" "$BASE/theme/input/templates/pandoc"
+printf 'staged template\n' > "$BASE/theme/input/templates/pandoc/tmpl.html"
+printf 'template.structure = ./tmpl.html\n' \
+	> "$BASE/theme/input/templates/pandoc/template.conf"
+cp "$REPO/lib/payload/payload.sh" "$REPO/lib/conf.sh" "$BASE/theme/_lib/"
+chmod +x "$BASE/theme/_lib/payload.sh"
 run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
-check "the staged template wins" "yes" \
-      "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/article.tmpl")"
+check "the declared template wins" "yes" \
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/input/templates/pandoc/tmpl.html")"
 check "and the engine's is not also passed" "no" \
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
+
+# The point of the change, stated directly: a file with the old magic name, not
+# declared by any template.conf, is now just a file.
+fixture
+mkdir -p "$BASE/theme/_lib"
+printf 'undeclared\n' > "$BASE/theme/article.tmpl"
+cp "$REPO/lib/payload/payload.sh" "$REPO/lib/conf.sh" "$BASE/theme/_lib/"
+chmod +x "$BASE/theme/_lib/payload.sh"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+check "an undeclared article.tmpl no longer wins" "no" \
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/article.tmpl")"
+check "the engine's own is used instead" "yes" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
 
 # A staged directory with no template at all falls back to the engine's own,

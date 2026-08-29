@@ -37,10 +37,19 @@ FORMAT=commonmark_x-raw_html+task_lists+definition_lists
 # does not know that syntax and printed the markup into the PDF as literal
 # text. Every shipped theme did this.
 #
-# Staging now selects a template by ecosystem (HTML + pandoc $var$ here, not
-# HTML + Mustache), so what arrives under this name is always one pandoc can
-# fill. The engine's own copy remains the fallback for a bare `docker run` with
-# no theme mounted, which is a supported way to use these images.
+# The template, ASKED FOR RATHER THAN GUESSED.
+#
+# The payload names its own structural file in templates/<id>/template.conf,
+# and _lib/payload.sh reads it -- the same reader, at the same revision, that
+# the wrapper used to assemble the payload, because it travels inside it. That
+# replaces looking for `article.tmpl` at the payload root, which was a leftover
+# from when the mounted directory WAS the theme and is the by-name coupling
+# that once let a Mustache template reach pandoc.
+#
+# The engine's own copy stays as the fallback for a bare `docker run` with no
+# payload mounted, which is a supported way to use these images: there is no
+# _lib/ there and no conf files to read, so the engine falls back to what it
+# ships, exactly as the contract says it should.
 #
 # `if`, not `[ ... ] && ...`. Under `set -e` a bare test that fails is a
 # failing command, and if it is the last one in the script -- or anywhere the
@@ -48,7 +57,16 @@ FORMAT=commonmark_x-raw_html+task_lists+definition_lists
 # non-zero status the caller can see a reason for. Three bugs in lib/browser.sh
 # were exactly this shape (daf9507).
 TEMPLATE=$ENGINE/article.tmpl
-if [ -f "$theme/article.tmpl" ]; then TEMPLATE=$theme/article.tmpl; fi
+if [ -x "$theme/_lib/payload.sh" ]; then
+	# Relative to the payload, so it is correct at whatever path the payload
+	# was mounted at. `|| :` because a payload naming no template is not an
+	# error -- it means this engine's built-in, which is what TEMPLATE already
+	# holds.
+	_markup=$(sh "$theme/_lib/payload.sh" markup "$theme" 2>/dev/null || :)
+	if [ -n "$_markup" ] && [ -f "$theme/$_markup" ]; then
+		TEMPLATE=$theme/$_markup
+	fi
+fi
 
 # Both filters run when both exist: the engine's hoists the title and fills in
 # the year, and a theme's can add to that rather than having to reimplement it.
