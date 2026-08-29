@@ -249,6 +249,9 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 		done
 	done
 
+	# --- The payload's own reader --------------------------------------------
+	stage_lib "$_sb_out" || return 1
+
 	# --- The selected objects, mirrored --------------------------------------
 	#
 	# Every object that took part in this build, copied whole to its position
@@ -452,20 +455,17 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 	stage_manifest_add "$_stt_out" structure "" "" \
 		"input/$_stt_rel/$_stt_name" || return 1
 
-	# The legacy name at the root, for now. engines/vivlio/main.js and both
-	# pandoc renders still look for it, and they are updated separately; until
-	# then this keeps a staged directory readable by the engines as they stand.
+	# NO LEGACY COPY AT THE ROOT ANY MORE. Every engine now asks the payload
+	# what its structural file is called -- main.js through payload.js, both
+	# pandoc renders through _lib/payload.sh -- so nothing looks for
+	# `article.tmpl` or `global.tmpl` at the root, and putting one there would
+	# only invite something to start depending on the name again.
 	#
-	# The support files come with it. A structural file at the root whose
-	# SYSTEM entity resolves to nothing is worse than no file at all: pandoc
-	# fails while parsing the DTD subset, before any conversion begins. That is
-	# the exact failure template.support was invented to prevent, and mirroring
-	# reintroduces it unless both copies are complete.
-	cp -- "$_stt_src" "$_stt_out/$_stt_name" || return 1
-	template_support "$_stt_tmpl" | while IFS= read -r _stt_sup || [ -n "$_stt_sup" ]; do
-		[ -n "$_stt_sup" ] || continue
-		cp -- "$_stt_sup" "$_stt_out/" || exit 1
-	done || return 1
+	# That also retires the trap the copy carried with it: a structural file at
+	# the root whose SYSTEM entity resolved to nothing was worse than no file
+	# at all, because pandoc failed while parsing the DTD subset before any
+	# conversion began. The mirrored copy has its template.support files beside
+	# it by construction, which is where they have to be.
 
 	return 0
 }
@@ -942,6 +942,50 @@ stage_mirror_all() {  # stage_mirror_all <chain> <engine> <styler> <out>
 		done
 	done || return 1
 
+	return 0
+}
+
+
+# Ship the payload reader inside the payload.
+#
+#   stage_lib <staged-dir>
+#
+# `_lib/payload.sh` answers "what is the structural file" and "which
+# stylesheets, in what order" for the payload it sits in. It travels WITH the
+# payload rather than being COPYed into an image or mounted from the host,
+# because those two both produce version skew: a moving `:<engine>` tag run
+# against a differently-versioned wrapper would carry two implementations of
+# the §5 cascade order, differing by however many commits separate them, and
+# the symptom is a wrongly-ordered stylesheet rather than an error. Travelling
+# in the payload gives an engine the rules the payload was actually assembled
+# under. See PAYLOAD-PLAN §14.
+#
+# The `_` prefix marks what the wrapper generated rather than what an author
+# wrote, as _payload.css does, so it cannot collide with a mirrored object.
+#
+# NOT part of the staging key, and nothing has to be done to keep it that way:
+# stage_key hashes the SOURCE files a build selects, never the payload it
+# produces. Worth stating because §14 called for the exclusion explicitly --
+# hashing these would invalidate every cached payload on every wrapper release
+# for no behavioural reason. If stage_key ever grows a "hash the output"
+# branch, this directory has to be skipped by it.
+stage_lib() {  # stage_lib <staged-dir>
+	_sli_src="${PDFULATOR_LIB:-$PDFULATOR_DIR/lib}"
+	[ -d "$_sli_src/payload" ] || return 0
+
+	_sli_out="$1/_lib"
+	mkdir -p -- "$_sli_out" || return 1
+
+	for _sli_f in "$_sli_src"/payload/*; do
+		[ -f "$_sli_f" ] || continue
+		cp -- "$_sli_f" "$_sli_out/" || return 1
+	done
+
+	# conf.sh is the reader payload.sh sources, and is the wrapper's own -- one
+	# implementation of the conf grammar, not a copy that can drift from it.
+	[ -f "$_sli_src/conf.sh" ] && { cp -- "$_sli_src/conf.sh" "$_sli_out/" || return 1; }
+
+	chmod +x "$_sli_out/payload.sh" 2>/dev/null || :
 	return 0
 }
 

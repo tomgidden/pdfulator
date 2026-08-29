@@ -350,6 +350,32 @@ JSEOF
 
 	ok "and finds the declared markup, not a fixed name" "markup.html" \
 	   "$(printf '%s\n' "$JS" | sed -n 3p)"
+
+	# And the third implementation: _lib/payload.sh, which is what a
+	# containerised engine runs. It ships INSIDE the payload precisely so that
+	# it cannot be a different revision from the wrapper that built it -- but
+	# that guarantee is about packaging, and says nothing about whether the
+	# code agrees. This is where that is checked.
+	# PDFULATOR_LIB, because PDFULATOR_DIR points at the fixture root here and
+	# the reader being tested is the repository's.
+	PDFULATOR_LIB="$REPO/lib" stage_lib "$P2" || :
+	SH2=$(sh "$P2/_lib/payload.sh" stylesheets "$P2" |
+		while IFS= read -r _f || [ -n "$_f" ]; do
+			[ -n "$_f" ] || continue
+			basename -- "$_f"
+		done | tr '\n' ' ' | sed 's/ $//')
+
+	ok "the payload's own reader agrees too" "$SH" "$SH2"
+	ok "and finds the same markup" "markup.html" \
+	   "$(basename -- "$(sh "$P2/_lib/payload.sh" markup "$P2")")"
+	ok "and reads the engine and styler" "eng sty" \
+	   "$(sh "$P2/_lib/payload.sh" engine "$P2")"
+
+	# Paths are printed RELATIVE to the payload, so an engine that sees it
+	# through a container mount at /payload can use them unchanged. An absolute
+	# path here would name a directory that does not exist inside the container.
+	ok "paths are relative to the payload" "no" \
+	   "$(sh "$P2/_lib/payload.sh" stylesheets "$P2" | grep -q '^/' && echo yes || echo no)"
 fi
 
 

@@ -10,7 +10,8 @@
 # should not means re-downloading fonts per document, and a key that fails to
 # change when it should means editing a theme has no effect -- which is far
 # worse, because it looks like the edit was wrong.
-LIB=$(cd "$(dirname "$0")/../lib" && pwd)
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+LIB="$REPO/lib"
 . "$LIB/conf.sh"
 . "$LIB/paths.sh"
 . "$LIB/theme.sh"
@@ -52,6 +53,10 @@ setup() {
 
 	PDFULATOR_HOME="$BASE/home"
 	PDFULATOR_DIR="$BASE"
+	# PDFULATOR_DIR is the fixture, so stage_lib would find no lib/payload/
+	# there and the payload would ship no reader. The reader under test is the
+	# repository's, and it is what a real payload carries.
+	PDFULATOR_LIB="$REPO/lib"
 	BUILTIN_THEME="$BASE/theme"
 	unset PDFULATOR_FONT_FALLBACK
 
@@ -113,12 +118,23 @@ ok "each part says where it came from" "3" \
 # The template comes from the engine's declared ecosystem, not from a file
 # named article.tmpl in the theme chain. This is the regression that mattered:
 # both templates below are called article.tmpl and only one is Mustache.
+#
+# Read from the MIRROR, not from the payload root. There is no copy at the root
+# any more: every engine asks the payload what its structural file is called
+# (main.js via payload.js, both pandoc renders via _lib/payload.sh), so a copy
+# under an agreed name would only invite something to depend on the name again.
+# The property under test is unchanged -- which template arrives -- so the
+# assertion moves rather than goes.
+staged_markup() {  # staged_markup <payload>
+	sh "$1/_lib/payload.sh" markup "$1" 2>/dev/null
+}
+
 ok "the engine's template ecosystem is staged" "MUSTACHE-TMPL" \
-	"$(cat "$d/article.tmpl")"
+	"$(cat "$d/$(staged_markup "$d")" 2>/dev/null)"
 
 dp=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || dp=""
 ok "a different engine gets a different template" "PANDOC-TMPL" \
-	"$(cat "$dp/article.tmpl")"
+	"$(cat "$dp/$(staged_markup "$dp")" 2>/dev/null)"
 ok "and they are not the same staged directory" "no" \
 	"$([ "$d" = "$dp" ] && echo yes || echo no)"
 
@@ -128,7 +144,7 @@ ok "and they are not the same staged directory" "no" \
 echo 'THEME-MUSTACHE' > "$BASE/themes/derived/article.tmpl"
 dp2=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || dp2=""
 ok "a theme's stray article.tmpl does not reach another ecosystem" "PANDOC-TMPL" \
-	"$(cat "$dp2/article.tmpl")"
+	"$(cat "$dp2/$(staged_markup "$dp2")" 2>/dev/null)"
 rm -f "$BASE/themes/derived/article.tmpl"
 
 # A template's support files land beside its structure. The DocBook template
@@ -139,8 +155,17 @@ echo 'ENTITIES' > "$BASE/templates/pandoc/extra.ent"
 printf 'template.structure = ./article.tmpl\ntemplate.support = ./extra.ent\n' \
 	> "$BASE/templates/pandoc/template.conf"
 ds=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || ds=""
+# Beside the structure in the mirror, which is the position that matters: a
+# SYSTEM entity resolves relative to the file naming it, so the support file has
+# to sit next to the template wherever the template actually is.
 ok "a support file is staged beside the structure" "ENTITIES" \
-	"$(cat "$ds/extra.ent" 2>/dev/null)"
+	"$(cat "$(dirname -- "$ds/$(staged_markup "$ds")")/extra.ent" 2>/dev/null)"
+
+# The legacy root copy is gone, and must stay gone: an engine that found
+# `article.tmpl` there would work by name again, which is the coupling the
+# template object exists to remove.
+ok "no template is staged at the payload root" "no" \
+	"$([ -e "$ds/article.tmpl" ] && echo yes || echo no)"
 
 # And it is part of the identity: editing one must restage, or the cache serves
 # a directory built before the change.

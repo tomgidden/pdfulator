@@ -30,8 +30,24 @@ export XML_CATALOG_FILES="/etc/xml/catalog /usr/local/etc/xml/catalog"
 #
 # `if`, not `[ ... ] && ...`: under set -e a bare test that fails is a failing
 # command, and a theme supplying none of these is the common case.
+# The template, asked for rather than guessed: the payload names its own
+# structural file and _lib/payload.sh reads it. See the same block in
+# pandoc-pagedjs/render. The engine's own copy is the fallback for a bare
+# `docker run` with nothing mounted.
+#
+# For this engine the structural file is DocBook 5, and it lives in the
+# engine's own xsl/ directory rather than under templates/ -- it is written
+# against fo.xsl, global.ent and titlepages.xsl and they resolve relative to
+# each other. templates/docbook5-pandoc/template.conf points back at it, which
+# is exactly the indirection this mechanism exists to allow: the template says
+# where its markup is, and it need not be under templates/.
 TEMPLATE=$ENGINE/xsl/global.tmpl
-if [ -f "$theme/global.tmpl" ]; then TEMPLATE=$theme/global.tmpl; fi
+if [ -x "$theme/_lib/payload.sh" ]; then
+	_markup=$(sh "$theme/_lib/payload.sh" markup "$theme" 2>/dev/null || :)
+	if [ -n "$_markup" ] && [ -f "$theme/$_markup" ]; then
+		TEMPLATE=$theme/$_markup
+	fi
+fi
 
 STYLESHEET=$ENGINE/xsl/fo.xsl
 if [ -f "$theme/fo.xsl" ]; then STYLESHEET=$theme/fo.xsl; fi
