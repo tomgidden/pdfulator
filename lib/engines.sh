@@ -365,13 +365,13 @@ engine_prepare() {  # engine_prepare <id> [force]
 # already settled by the caller, and the engine is told rather than left to
 # find out. Exported here rather than by each engine so that every engine sees
 # the same contract.
-engine_convert() {  # engine_convert <id> <input|-> <output|-> <theme-dir>
+engine_convert() {  # engine_convert <id> <input|-> <output|-> <payload-dir>
 	_ec_id=$1
 	shift
 
 	# No PDFULATOR_DEFAULTS any more: there is no defaults directory to point
-	# at. Everything an engine used to find there now arrives in the staged
-	# theme it is handed as its third argument.
+	# at. Everything an engine used to find there now arrives in the payload it
+	# is handed as its third argument.
 	PDFULATOR_HOME="$PDFULATOR_HOME" \
 		"$(engine_entry "$_ec_id")" "$@"
 }

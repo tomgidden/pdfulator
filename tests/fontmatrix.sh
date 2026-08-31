@@ -351,12 +351,12 @@ body.face.700.normal.file = fonts/r.ttf
 EOF
 fonts_merge "$BASE/mf" "$BASE/themes/fop/fonts.conf"
 fonts_acquire "$BASE/mf" body 700 normal "$BASE/stage/fonts" >/dev/null
-fonts_fop_xconf "$BASE/mf" "$BASE/stage/fonts" /theme/fonts "$BASE/stage/fop.xconf"
+fonts_fop_xconf "$BASE/mf" "$BASE/stage/fonts" /payload/fonts "$BASE/stage/fop.xconf"
 
 ok "a font element is written" "1" \
 	"$(grep -c '<font embed-url=' "$BASE/stage/fop.xconf")"
 ok "the embed url uses the runtime base" "yes" \
-	"$(grep -q 'embed-url="/theme/fonts/figtree-700-normal.ttf"' \
+	"$(grep -q 'embed-url="/payload/fonts/figtree-700-normal.ttf"' \
 	   "$BASE/stage/fop.xconf" && echo yes || echo no)"
 
 # Explicit triplets rather than a directory scan: a scan makes FOP take the
@@ -379,7 +379,7 @@ body.face.400.normal.file = fonts/w.woff2
 EOF
 fonts_merge "$BASE/mw" "$BASE/themes/woff/fonts.conf"
 fonts_acquire "$BASE/mw" body 400 normal "$BASE/stage/fonts" >/dev/null
-warn=$(fonts_fop_xconf "$BASE/mw" "$BASE/stage/fonts" /theme/fonts \
+warn=$(fonts_fop_xconf "$BASE/mw" "$BASE/stage/fonts" /payload/fonts \
 	"$BASE/stage/woff.xconf" 2>&1)
 
 ok "a woff2 face is skipped for FOP" "0" \

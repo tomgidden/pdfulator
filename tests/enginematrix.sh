@@ -401,9 +401,9 @@ PDFULATOR_PREPARE_VERSION=test-1
 
 echo "============ DISPATCH ============"
 setup
-CHROME_PATH=/fake/chrome engine_convert vivlio /in.md /out.pdf /theme
+CHROME_PATH=/fake/chrome engine_convert vivlio /in.md /out.pdf /payload
 check "the right engine ran" "vivlio" "$(cut -d'|' -f1 < "$BASE/ran")"
-check "input, output and theme are passed" "/in.md|/out.pdf|/theme" \
+check "input, output and payload are passed" "/in.md|/out.pdf|/payload" \
       "$(cut -d'|' -f2,3,4 < "$BASE/ran")"
 # The environment is the rest of the contract: an engine is told which browser
 # to use rather than going to look.

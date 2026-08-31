@@ -32,7 +32,7 @@ check() {  # check <description> <expected> <actual>
 }
 
 # The image's layout, rebuilt in a temporary directory: /defaults, /engine,
-# /theme and /work become $BASE/... and the stubs stand in for the tools.
+# /payload and /work become $BASE/... and the stubs stand in for the tools.
 #
 # The script hardcodes those absolute paths, as it should -- they are fixed by
 # its own Dockerfile, and making them configurable would be inventing a
@@ -40,16 +40,17 @@ check() {  # check <description> <expected> <actual>
 # which is the one thing here that is not the shipped file.
 fixture() {
 	rm -rf "$BASE"
-	mkdir -p "$BASE/engine" "$BASE/theme" "$BASE/work" \
+	mkdir -p "$BASE/engine" "$BASE/payload" "$BASE/work" \
 	         "$BASE/bin" "$BASE/in" "$BASE/out"
 
 	printf 'template\n'  > "$BASE/engine/template.html.pandoc"
 	printf '%s\n' '-- filter' > "$BASE/engine/metadata.lua"
-	# The theme arrives staged: the wrapper has already concatenated the CSS
+	# The payload arrives staged: the wrapper has already concatenated the CSS
 	# cascade and generated the @font-face rules, so the engine sees two plain
-	# files rather than a theme it has to resolve anything about.
-	printf 'body{}\n'    > "$BASE/theme/print.css"
-	printf ':root{}\n'   > "$BASE/theme/fonts.css"
+	# files rather than a theme it has to resolve anything about. (The fixture
+	# is not a full payload -- it has no _lib/ -- which is the bare-run shape.)
+	printf 'body{}\n'    > "$BASE/payload/print.css"
+	printf ':root{}\n'   > "$BASE/payload/fonts.css"
 
 	printf '# A document\n\nBody text.\n' > "$BASE/in/doc.md"
 
@@ -90,7 +91,7 @@ STUB
 	PATH="$BASE/bin:$PATH"; export PATH
 }
 
-run() {  # run <in> <out> <theme>
+run() {  # run <in> <out> <payload>
 	( cd "$BASE" && "$BASE/render" "$1" "$2" "$3" >"$BASE/stdout" 2>"$BASE/err" )
 }
 
@@ -109,7 +110,7 @@ argn() {  # argn <logfile> <n>
 
 echo "============ PANDOC INVOCATION ============"
 fixture
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 
 # commonmark_x, not pandoc's own markdown dialect: it is CommonMark plus a
 # curated extension set, so a document that renders elsewhere renders here.
@@ -140,25 +141,25 @@ echo "============ STYLESHEET LINKS ============"
 #
 # So render computes them, and passes one --variable per sheet THAT EXISTS.
 fixture
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 
 check "fonts.css is linked" "yes" \
-      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/fonts.css")"
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/payload/fonts.css")"
 check "print.css is linked" "yes" \
-      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/print.css")"
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/payload/print.css")"
 
 # The fixture theme has no logo.css, which is the normal case -- a theme
 # without a logo generates none. Linking it anyway is the bug above.
 check "an absent logo.css is not linked" "no" \
-      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/logo.css")"
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/payload/logo.css")"
 
 # Present, and it is linked. Without this the test above would pass on a render
 # that never emits logo.css at all.
 fixture
-printf '.logo{}\n' > "$BASE/theme/logo.css"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+printf '.logo{}\n' > "$BASE/payload/logo.css"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "a present logo.css is linked" "yes" \
-      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/logo.css")"
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/payload/logo.css")"
 
 # Order is §5's and linkTags()'s: fonts first, because it declares the
 # @font-face and --pdfulator-<role> properties every later sheet may use.
@@ -171,17 +172,17 @@ check "fonts.css comes before print.css" "yes" \
 # theme's own stylesheets do. They are linked directly, so the fallback theme
 # still styles the document rather than rendering bare but succeeding.
 fixture
-rm -f "$BASE/theme/print.css" "$BASE/theme/fonts.css"
-printf 'body{}\n' > "$BASE/theme/default.theme.css"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+rm -f "$BASE/payload/print.css" "$BASE/payload/fonts.css"
+printf 'body{}\n' > "$BASE/payload/default.theme.css"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "a payload-less theme links its own stylesheets" "yes" \
-      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/default.theme.css")"
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/payload/default.theme.css")"
 
 # A theme with no CSS at all links nothing, and must still render. This is the
 # case that has to degrade quietly rather than fail.
 fixture
-rm -f "$BASE/theme/print.css" "$BASE/theme/fonts.css"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+rm -f "$BASE/payload/print.css" "$BASE/payload/fonts.css"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "no stylesheets at all still renders" "0" "$?"
 check "and links nothing" "0" \
       "$(grep -c '^--variable=pdfulator_stylesheet:' "$PANDOC_LOG" || :)"
@@ -202,7 +203,7 @@ echo "============ SIDECAR ============"
 # checking that the command succeeded -- it always did.
 fixture
 printf 'title: From the sidecar\n' > "$BASE/in/doc.yaml"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "a .yaml sidecar becomes --metadata-file" "yes" \
       "$(grep -q -- '--metadata-file=.*doc\.yaml$' "$PANDOC_LOG" && echo yes || echo no)"
 # The assertion that matters: it must not appear as a bare input path, which
@@ -214,18 +215,18 @@ check "the document is the only input" "1" \
 
 fixture
 printf 'title: From a .yml\n' > "$BASE/in/doc.yml"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check ".yml is a sidecar too" "yes" \
       "$(grep -q -- '--metadata-file=.*doc\.yml$' "$PANDOC_LOG" && echo yes || echo no)"
 
 fixture
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "no sidecar, no --metadata-file" "no" \
       "$(grep -q -- '--metadata-file' "$PANDOC_LOG" && echo yes || echo no)"
 
 # stdin has no sidecar to find -- there is no path to look beside.
 fixture
-printf '# Piped\n' | ( cd "$BASE" && "$BASE/render" - - "$BASE/theme" >/dev/null 2>&1 )
+printf '# Piped\n' | ( cd "$BASE" && "$BASE/render" - - "$BASE/payload" >/dev/null 2>&1 )
 check "stdin has no sidecar" "no" \
       "$(grep -q -- '--metadata-file' "$PANDOC_LOG" && echo yes || echo no)"
 
@@ -245,45 +246,45 @@ echo "============ THEME OVERRIDES ============"
 # improvement: a template arrives because something declared it, not because it
 # was called the right thing.
 fixture
-mkdir -p "$BASE/theme/_lib" "$BASE/theme/input/templates/pandoc"
-printf 'staged template\n' > "$BASE/theme/input/templates/pandoc/tmpl.html"
+mkdir -p "$BASE/payload/_lib" "$BASE/payload/input/templates/pandoc"
+printf 'staged template\n' > "$BASE/payload/input/templates/pandoc/tmpl.html"
 printf 'markup = ./tmpl.html\n' \
-	> "$BASE/theme/input/templates/pandoc/template.conf"
-cp "$REPO/lib/payload/payload.sh" "$REPO/lib/conf.sh" "$BASE/theme/_lib/"
-chmod +x "$BASE/theme/_lib/payload.sh"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+	> "$BASE/payload/input/templates/pandoc/template.conf"
+cp "$REPO/lib/payload/payload.sh" "$REPO/lib/conf.sh" "$BASE/payload/_lib/"
+chmod +x "$BASE/payload/_lib/payload.sh"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "the declared template wins" "yes" \
-      "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/input/templates/pandoc/tmpl.html")"
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/payload/input/templates/pandoc/tmpl.html")"
 check "and the engine's is not also passed" "no" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/template.html.pandoc")"
 
 # The point of the change, stated directly: a file with the old magic name, not
 # declared by any template.conf, is now just a file.
 fixture
-mkdir -p "$BASE/theme/_lib"
-printf 'undeclared\n' > "$BASE/theme/article.tmpl"
-cp "$REPO/lib/payload/payload.sh" "$REPO/lib/conf.sh" "$BASE/theme/_lib/"
-chmod +x "$BASE/theme/_lib/payload.sh"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+mkdir -p "$BASE/payload/_lib"
+printf 'undeclared\n' > "$BASE/payload/article.tmpl"
+cp "$REPO/lib/payload/payload.sh" "$REPO/lib/conf.sh" "$BASE/payload/_lib/"
+chmod +x "$BASE/payload/_lib/payload.sh"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "an undeclared article.tmpl no longer wins" "no" \
-      "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/article.tmpl")"
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/payload/article.tmpl")"
 check "the engine's own is used instead" "yes" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/template.html.pandoc")"
 
 # A staged directory with no template at all falls back to the engine's own,
 # which is what a bare `docker run` with no mounts gets.
 fixture
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "no staged template falls back to the engine's" "yes" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/template.html.pandoc")"
 
 fixture
-printf '%s\n' '-- theme filter' > "$BASE/theme/metadata.lua"
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+printf '%s\n' '-- theme filter' > "$BASE/payload/metadata.lua"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 # Both filters run, deliberately: the engine's hoists the title and fills in
 # the year, and a theme's adds to that rather than reimplementing it.
 check "a theme filter is added" "yes" \
-      "$(haslog "$PANDOC_LOG" "--lua-filter=$BASE/theme/metadata.lua")"
+      "$(haslog "$PANDOC_LOG" "--lua-filter=$BASE/payload/metadata.lua")"
 check "the engine's filter still runs" "yes" \
       "$(haslog "$PANDOC_LOG" "--lua-filter=$BASE/engine/metadata.lua")"
 
@@ -291,14 +292,14 @@ check "the engine's filter still runs" "yes" \
 # an error. Under `set -e` a bare `[ -f ... ] && VAR=...` whose test fails is
 # a failing command -- the shape that silently aborted browser_gather.
 fixture
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "a bare theme is not an error" "yes" \
       "$([ -s "$BASE/out/doc.pdf" ] && echo yes || echo no)"
 
 
 echo "============ PAGEDJS INVOCATION ============"
 fixture
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 # Not optional in a container: --no-sandbox because Chromium's sandbox needs
 # privileges a default `docker run` does not grant, and --disable-dev-shm-usage
 # because /dev/shm defaults to 64MB, which a paginating renderer exhausts on a
@@ -312,7 +313,7 @@ check "pagedjs reads pandoc's html" "yes" \
 
 echo "============ STREAMS ============"
 fixture
-printf '# Piped\n\nFrom stdin.\n' | ( cd "$BASE" && "$BASE/render" - - "$BASE/theme" > "$BASE/piped.pdf" 2>/dev/null )
+printf '# Piped\n\nFrom stdin.\n' | ( cd "$BASE" && "$BASE/render" - - "$BASE/payload" > "$BASE/piped.pdf" 2>/dev/null )
 check "stdin to stdout emits a PDF" "yes" \
       "$(head -c 5 "$BASE/piped.pdf" 2>/dev/null | grep -q '%PDF-' && echo yes || echo no)"
 
@@ -321,32 +322,32 @@ check "stdin to stdout emits a PDF" "yes" \
 # is a broken command line, while an empty document is one someone has started
 # and not yet written. See [[pdfulator-behaviour-traps]].
 fixture
-printf '' | ( cd "$BASE" && "$BASE/render" - - "$BASE/theme" >/dev/null 2>"$BASE/err" )
+printf '' | ( cd "$BASE" && "$BASE/render" - - "$BASE/payload" >/dev/null 2>"$BASE/err" )
 check "empty stdin is refused" "1" "$?"
 check "and says so" "yes" \
       "$(grep -q 'empty input on stdin' "$BASE/err" && echo yes || echo no)"
 
 fixture
 : > "$BASE/in/empty.md"
-run "$BASE/in/empty.md" "$BASE/out/empty.pdf" "$BASE/theme"
+run "$BASE/in/empty.md" "$BASE/out/empty.pdf" "$BASE/payload"
 check "an empty file is not refused" "yes" \
       "$([ -s "$BASE/out/empty.pdf" ] && echo yes || echo no)"
 
 fixture
-run "$BASE/in/nope.md" "$BASE/out/x.pdf" "$BASE/theme"
+run "$BASE/in/nope.md" "$BASE/out/x.pdf" "$BASE/payload"
 check "a missing input fails" "1" "$?"
 
 
 echo "============ OUTPUT ============"
 fixture
-run "$BASE/in/doc.md" "$BASE/out/sub/deep/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/sub/deep/doc.pdf" "$BASE/payload"
 check "a missing output directory is created" "yes" \
       "$([ -f "$BASE/out/sub/deep/doc.pdf" ] && echo yes || echo no)"
 
 # The PDF is assembled in the scratch directory and moved, so an interrupted
 # run cannot leave a half-written file that still looks like a PDF.
 fixture
-run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 check "the output is a PDF" "yes" \
       "$(head -c 5 "$BASE/out/doc.pdf" | grep -q '%PDF-' && echo yes || echo no)"
 
@@ -357,7 +358,7 @@ check "the scratch directory is cleaned up" "0" \
 
 fixture
 ( cd "$BASE" && PDFULATOR_DEBUG=1 "$BASE/render" "$BASE/in/doc.md" \
-	"$BASE/out/doc.pdf" "$BASE/theme" >/dev/null 2>&1 )
+	"$BASE/out/doc.pdf" "$BASE/payload" >/dev/null 2>&1 )
 check "debug keeps it" "1" \
       "$(ls "$BASE/work" 2>/dev/null | wc -l | tr -d ' ')"
 
@@ -369,7 +370,7 @@ echo "============ SET -E ============"
 fixture
 sh -c "set -e; PATH='$BASE/bin:$PATH' PANDOC_LOG='$PANDOC_LOG' \
        PAGEDJS_LOG='$PAGEDJS_LOG' '$BASE/render' '$BASE/in/doc.md' \
-       '$BASE/out/doc.pdf' '$BASE/theme'" >/dev/null 2>&1
+       '$BASE/out/doc.pdf' '$BASE/payload'" >/dev/null 2>&1
 check "render survives set -e" "0" "$?"
 
 echo

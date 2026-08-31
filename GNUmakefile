@@ -15,7 +15,7 @@ DOCKER_ENGINES = $(shell grep -l '^needs_docker=yes' engines/*/engine.conf | \
                    sed 's|engines/||; s|/engine.conf||')
 
 # THEME= and DEBUG= become wrapper switches rather than docker options. The old
-# rules bolted `-v $(THEME):/app/theme` onto the container directly, which the
+# rules bolted `-v $(THEME):/app/payload` onto the container directly, which the
 # local (non-docker) rules could not use at all -- so `make THEME=x foo.pdf`
 # and `make THEME=x docker-foo.pdf` meant different things. Going through
 # --theme makes them one thing, and theme resolution stays in lib/theme.sh

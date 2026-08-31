@@ -145,9 +145,24 @@ stage_root() {
 # because a directory job or a watch session converts many documents against
 # one theme, and re-hardlinking a variable font per document is work nobody
 # asked for.
+#
+# STAGE_FORMAT is part of the key so that a change in the LAYOUT of a payload
+# invalidates every cached one. Nothing about a user's themes changes when the
+# wrapper starts generating something differently, so without this an upgrade
+# silently keeps serving payloads built to the old shape. That is not
+# hypothetical: renaming the container mount from /theme to /payload changed
+# the embed-url in every generated fop-fonts.xconf, and a cached payload from
+# before the rename made FOP fail to load a single font -- a stack trace with
+# no mention of caching or of the upgrade that caused it.
+#
+# Bump it whenever the payload's layout or its generated files change shape.
+# Cheap: the worst case is one restage per theme, which is what an upgrade
+# already implies.
+STAGE_FORMAT=2
+
 stage_key() {  # stage_key <chain> <engine> <styler> [css]
 	{
-		printf '%s\n' "$2" "$3"
+		printf '%s\n' "$STAGE_FORMAT" "$2" "$3"
 		# --css is part of the result, so it is part of the identity: two runs
 		# differing only in their extra stylesheet must not share a directory.
 		if [ -n "${4:-}" ] && [ -f "$4" ]; then
@@ -340,9 +355,15 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 }
 
 
-# The staged directory for a theme and engine, building it if absent.
+# The payload for a theme and engine, building it if absent.
 #
 #   stage_dir <theme-dir> <engine> <styler> [font-base]
+#
+# The ARGUMENT is a theme -- a real one, the leaf of an inheritance chain the
+# user named. What comes back is a PAYLOAD: that chain walked, the selected
+# engine, template and styler mirrored in, the CSS concatenated, the fonts
+# fetched. The two are different things and only the second is what an engine
+# ever sees, which is why everything downstream of here says `payload`.
 #
 # Prints the absolute path on stdout. Built into a temporary directory and
 # moved into place, so a build interrupted halfway cannot leave a partial

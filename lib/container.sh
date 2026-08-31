@@ -8,7 +8,7 @@
 # That translation is identical for vivlio-docker and pandoc-pagedjs, and will
 # be for pandoc-xslt: the same read-only input directory, the same writable
 # output directory, the same uid, the same $HOME. Only two things differ per
-# engine -- its name, for messages, and where its built-in theme lives inside
+# engine -- its name, for messages, and where its built-in fallback lives inside
 # its own image.
 #
 # Shared rather than copied because the parts that are easy to get wrong are
@@ -18,7 +18,7 @@
 # have them.
 #
 # Sourced by an engine's convert, which sets CONTAINER_ENGINE and
-# CONTAINER_THEME and then calls container_run. Requires nothing else -- an
+# CONTAINER_PAYLOAD and then calls container_run. Requires nothing else -- an
 # engine's convert is exec'd by the wrapper, not sourced into it, so this file
 # cannot assume lib/paths.sh is present.
 
@@ -125,19 +125,19 @@ container_pull() {  # container_pull <engine-dir> <engine-id>
 
 # Convert one document in a container.
 #
-#   container_run <engine-dir> <input|-> <output|-> <theme-dir>
+#   container_run <engine-dir> <input|-> <output|-> <payload-dir>
 #
 # Expects two variables from the calling engine:
-#   CONTAINER_ENGINE  the engine's id, used in messages
-#   CONTAINER_THEME   where its built-in theme lives inside its own image
-container_run() {  # container_run <engine-dir> <in> <out> <theme>
+#   CONTAINER_ENGINE   the engine's id, used in messages
+#   CONTAINER_PAYLOAD  where its built-in fallback lives inside its own image
+container_run() {  # container_run <engine-dir> <in> <out> <payload>
 	_cr_dir=$1
 	_cr_in=$2
 	_cr_out=$3
-	_cr_theme=${4:-}
+	_cr_payload=${4:-}
 
 	_cr_name=${CONTAINER_ENGINE:-container}
-	_cr_builtin=${CONTAINER_THEME:-/theme}
+	_cr_builtin=${CONTAINER_PAYLOAD:-/payload}
 
 	[ -n "$_cr_in" ]  || { echo "$_cr_name: no input given"  >&2; return 2; }
 	[ -n "$_cr_out" ] || { echo "$_cr_name: no output given" >&2; return 2; }
@@ -212,24 +212,25 @@ container_run() {  # container_run <engine-dir> <in> <out> <theme>
 		_cr_out_arg="/out/$(basename -- "$_cr_out_abs")"
 	fi
 
-	# --- Theme ---------------------------------------------------------------
+	# --- Payload -------------------------------------------------------------
 	#
-	# What arrives here is a *staged* theme: the wrapper has already walked the
-	# inheritance chain, concatenated the CSS, fetched the fonts and generated
-	# whatever configuration this engine reads. So it is always mounted.
+	# What arrives here is a PAYLOAD, not a theme: the wrapper has walked the
+	# inheritance chain, concatenated the CSS, fetched the fonts, mirrored the
+	# selected objects and generated whatever configuration this engine reads.
+	# A theme is one of the things that went INTO it. So it is always mounted.
 	#
-	# There used to be a special case that skipped the mount when the theme was
-	# the shipped $PDFULATOR_DIR/theme, on the grounds that the image already
-	# had an identical copy. That cannot be true of a staged directory -- it
+	# There used to be a special case that skipped the mount when the directory
+	# was the shipped $PDFULATOR_DIR/theme, on the grounds that the image
+	# already had an identical copy. That cannot be true of a payload -- it
 	# lives under $PDFULATOR_HOME/cache and is built per engine -- and skipping
-	# the mount would hand the container the theme baked in at build time,
+	# the mount would hand the container what was baked in at build time,
 	# silently ignoring the user's. The image's own copy is now only the
-	# fallback for a run that supplies no theme at all.
-	_cr_theme_arg=$_cr_builtin
-	if [ -n "$_cr_theme" ] && [ -d "$_cr_theme" ]; then
-		_cr_theme_abs=$(cd -- "$_cr_theme" && pwd)
-		set -- "$@" -v "$_cr_theme_abs:/theme:ro"
-		_cr_theme_arg=/theme
+	# fallback for a run that supplies no payload at all.
+	_cr_payload_arg=$_cr_builtin
+	if [ -n "$_cr_payload" ] && [ -d "$_cr_payload" ]; then
+		_cr_payload_abs=$(cd -- "$_cr_payload" && pwd)
+		set -- "$@" -v "$_cr_payload_abs:/payload:ro"
+		_cr_payload_arg=/payload
 	fi
 
 	# --- Ownership -----------------------------------------------------------
@@ -273,5 +274,5 @@ container_run() {  # container_run <engine-dir> <in> <out> <theme>
 	# spaces. That split is the whole reason for the two containers above.
 	# shellcheck disable=SC2086
 	exec "$_cr_docker" run $_cr_flags "$@" "$_cr_image" \
-		"$_cr_in_arg" "$_cr_out_arg" "$_cr_theme_arg"
+		"$_cr_in_arg" "$_cr_out_arg" "$_cr_payload_arg"
 }

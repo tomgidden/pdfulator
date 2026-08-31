@@ -55,7 +55,7 @@ RUN npm install -g --unsafe-perm --ignore-scripts pagedjs-cli
 
 # The engine's own filter, and the template it falls back to.
 #
-# No fonts and no stylesheet: both now come from the theme the wrapper stages
+# No fonts and no stylesheet: both now come from the payload the wrapper stages
 # and mounts, which is what lets one theme dress this engine and the browser
 # ones alike.
 #
@@ -68,14 +68,18 @@ RUN npm install -g --unsafe-perm --ignore-scripts pagedjs-cli
 COPY templates/html-pandoc-pagedjs/template.html.pandoc /engine/template.html.pandoc
 COPY engines/pandoc-pagedjs/_nopayload/metadata.lua        /engine/metadata.lua
 
-# The fallback theme, for a bare `docker run` that mounts nothing. Normally the
-# wrapper stages a theme and mounts it over this.
+# The fallback payload, for a bare `docker run` that mounts nothing. Normally
+# the wrapper stages a payload and mounts it over this.
+#
+# It is themes/default rather than a real payload: the wrapper's generated
+# files (print.css, fonts.css, logo.css) are not here, which is why `render`
+# links only the stylesheets it can actually find.
 #
 # themes/default no longer carries a template of its own -- that moved to
 # templates/html-mustache-vivlio -- so this is stylesheets and fonts.conf only,
 # and there is no longer any way for a Mustache template to arrive here under a
 # name pandoc would read.
-COPY themes/default /theme
+COPY themes/default /payload
 
 # Where the wrapper mounts things, plus the scratch directory the conversion
 # works in.
@@ -99,10 +103,10 @@ WORKDIR /work
 
 COPY --chmod=755 engines/pandoc-pagedjs/_nopayload/render /usr/local/bin/render
 
-# The engine contract, verbatim: <input|-> <output|-> <theme-dir>. Defaulting
-# to stdin -> stdout with the built-in theme is what makes the image usable
+# The engine contract, verbatim: <input|-> <output|-> <payload-dir>. Defaulting
+# to stdin -> stdout with the built-in fallback is what makes the image usable
 # with no wrapper and no installer:
 #
 #   docker run --rm --init -i tomgidden/pdfulator:pandoc-pagedjs < in.md > out.pdf
 ENTRYPOINT ["/usr/local/bin/render"]
-CMD ["-", "-", "/theme"]
+CMD ["-", "-", "/payload"]

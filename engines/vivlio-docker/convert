@@ -1,17 +1,17 @@
 #!/bin/sh
 # The vivlio-docker engine's convert step.
 #
-#   convert <input|-> <output|-> <theme-dir>
+#   convert <input|-> <output|-> <payload-dir>
 #
 # The same contract every engine honours, satisfied by running a container
 # rather than a local process. All the work is translation -- host paths into
 # mounts -- and that translation is identical for every container engine, so it
 # lives in lib/container.sh and this file supplies only what is specific:
-# which engine this is, and where its built-in theme sits inside its own image.
+# which engine this is, and where its built-in fallback sits inside its image.
 #
 # The wrapper is not involved in the translation and must not be. It resolved
-# the theme to a host directory because that is what it knows about; turning
-# that into `-v /Users/tom/themes/foo:/theme` is the engine's business, and an
+# the payload to a host directory because that is what it knows about; turning
+# that into `-v /Users/tom/.../cache/<key>:/payload` is the engine's business, and an
 # engine running natively would ignore it. That split is why the contract
 # passes a directory rather than a name (see lib/theme.sh).
 set -eu
@@ -29,9 +29,9 @@ LIB=${PDFULATOR_LIB:-$ENGINE_DIR/../../lib}
 
 CONTAINER_ENGINE=vivlio-docker
 
-# The image builds under /app, so its own theme is /app/theme -- unlike the
+# The image builds under /app, so its own fallback is /app/payload -- unlike the
 # pandoc engines, whose assets sit at the root. This is the one path that
 # genuinely differs between container engines.
-CONTAINER_THEME=/app/theme
+CONTAINER_PAYLOAD=/app/payload
 
 container_run "$ENGINE_DIR" "${1:-}" "${2:-}" "${3:-}"

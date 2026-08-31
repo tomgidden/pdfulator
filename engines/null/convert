@@ -1,7 +1,7 @@
 #!/bin/sh
 # The null engine's convert step.
 #
-#   convert <input|-> <output|-> <theme-dir>
+#   convert <input|-> <output|-> <payload-dir>
 #
 # Emits a minimal valid PDF -- `file(1)` reports "PDF document, version 1.0,
 # 1 pages" -- without a browser, a JS runtime or Docker. What makes it useful
@@ -18,7 +18,7 @@ set -eu
 
 in=${1:-}
 out=${2:-}
-theme=${3:-}
+payload=${3:-}
 
 [ -n "$in" ]  || { echo "null: no input given" >&2;  exit 2; }
 [ -n "$out" ] || { echo "null: no output given" >&2; exit 2; }
@@ -48,7 +48,7 @@ emit() {
 	printf '%%%%pdfulator-engine: null\n'
 	printf '%%%%pdfulator-input: %s\n'  "$(sanitise "$in_desc")"
 	printf '%%%%pdfulator-output: %s\n' "$(sanitise "$out")"
-	printf '%%%%pdfulator-theme: %s\n'  "$(sanitise "$theme")"
+	printf '%%%%pdfulator-payload: %s\n'  "$(sanitise "$payload")"
 	printf '%%%%pdfulator-title: %s\n'  "$(sanitise "$title")"
 	printf '%%%%pdfulator-bytes: %s\n'  "$bytes"
 	printf '%%%%pdfulator-chrome: %s\n' "$(sanitise "${CHROME_PATH:-}")"
