@@ -31,11 +31,38 @@ if [ -z "$CHROME_PATH" ]; then
 	exit 0
 fi
 
-BASE=${TMPDIR:-/tmp}/pdfulator-argmatrix
+# A FRESH DIRECTORY PER CASE, never one path reused.
+#
+# This test used to reuse a single $BASE, deleting and recreating it in
+# fixture(). On macOS that makes roughly half the docker cases fail with
+#
+#   pandoc-pagedjs: no such input: /in/a.md
+#
+# The mount is correct and the file is there on the host; Docker Desktop's
+# file-sharing layer is still serving the inode the path had BEFORE the
+# `rm -rf`, so /in arrives empty. It clears on its own after a moment, which is
+# what made this intermittent and made the failures look like a wrapper bug in
+# whichever case happened to land on a stale mount.
+#
+# Demonstrated directly, without pdfulator in the picture:
+#
+#   rm -rf $D; mkdir $D; touch $D/a.md
+#   docker run --rm -v $D:/in:ro alpine ls /in    # -> a.md
+#   rm -rf $D; mkdir $D; touch $D/a.md
+#   docker run --rm -v $D:/in:ro alpine ls /in    # -> (empty)
+#
+# A path that has never been deleted-and-recreated always mounts correctly, so
+# each case gets its own. $BASE_ROOT is removed once, at exit, after every
+# container has finished with it.
+BASE_ROOT=${TMPDIR:-/tmp}/pdfulator-argmatrix.$$
+CASE=0
 FAIL=0
+trap 'rm -rf "$BASE_ROOT"' EXIT INT TERM
 
 fixture() {
-	rm -rf "$BASE"; mkdir -p "$BASE"; cd "$BASE" || exit 1
+	CASE=$((CASE + 1))
+	BASE=$BASE_ROOT/case-$CASE
+	mkdir -p "$BASE"; cd "$BASE" || exit 1
 	for n in a b c; do printf '# Doc %s\n\nBody of %s.\n' "$n" "$n" > "$n.md"; done
 	printf '%%PDF-1.4\n%%real enough\n'          > real.pdf   # PDF by content
 	printf '# Actually markdown\n\nDespite it.\n' > liar.pdf   # .pdf, not a PDF

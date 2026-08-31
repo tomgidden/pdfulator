@@ -127,6 +127,66 @@ check "the engine's filter is used" "yes" \
       "$(haslog "$PANDOC_LOG" "--lua-filter=$BASE/engine/metadata.lua")"
 
 
+
+echo "============ STYLESHEET LINKS ============"
+# The template used to hardcode three <link>s -- fonts.css, print.css,
+# logo.css -- and that was invisible for as long as anything mounted a payload,
+# because the wrapper generates all three at the payload root. A bare
+# `docker run` mounts nothing, gets the image's baked-in themes/default, and
+# that directory has none of those names: it ships `default.theme.css` and a
+# `fonts.conf` from which fonts.css would be GENERATED. All three <link>s then
+# 404, and pagedjs-cli aborts the whole render with `ProgressEvent` -- naming
+# neither the file nor the reason.
+#
+# So render computes them, and passes one --variable per sheet THAT EXISTS.
+fixture
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+
+check "fonts.css is linked" "yes" \
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/fonts.css")"
+check "print.css is linked" "yes" \
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/print.css")"
+
+# The fixture theme has no logo.css, which is the normal case -- a theme
+# without a logo generates none. Linking it anyway is the bug above.
+check "an absent logo.css is not linked" "no" \
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/logo.css")"
+
+# Present, and it is linked. Without this the test above would pass on a render
+# that never emits logo.css at all.
+fixture
+printf '.logo{}\n' > "$BASE/theme/logo.css"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+check "a present logo.css is linked" "yes" \
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/logo.css")"
+
+# Order is §5's and linkTags()'s: fonts first, because it declares the
+# @font-face and --pdfulator-<role> properties every later sheet may use.
+check "fonts.css comes before print.css" "yes" \
+      "$(awk '/^--variable=pdfulator_stylesheet:/{n++;
+              if ($0 ~ /fonts\.css$/) f=n; if ($0 ~ /print\.css$/) p=n}
+              END{print (f && p && f < p) ? "yes" : "no"}' "$PANDOC_LOG")"
+
+# The payload-less case: none of the three generated names exist, but the
+# theme's own stylesheets do. They are linked directly, so the fallback theme
+# still styles the document rather than rendering bare but succeeding.
+fixture
+rm -f "$BASE/theme/print.css" "$BASE/theme/fonts.css"
+printf 'body{}\n' > "$BASE/theme/default.theme.css"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+check "a payload-less theme links its own stylesheets" "yes" \
+      "$(haslog "$PANDOC_LOG" "--variable=pdfulator_stylesheet:$BASE/theme/default.theme.css")"
+
+# A theme with no CSS at all links nothing, and must still render. This is the
+# case that has to degrade quietly rather than fail.
+fixture
+rm -f "$BASE/theme/print.css" "$BASE/theme/fonts.css"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
+check "no stylesheets at all still renders" "0" "$?"
+check "and links nothing" "0" \
+      "$(grep -c '^--variable=pdfulator_stylesheet:' "$PANDOC_LOG" || :)"
+
+
 echo "============ SIDECAR ============"
 # A sidecar goes in as --metadata-file, NOT as a second input file.
 #
