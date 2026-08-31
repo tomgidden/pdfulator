@@ -328,6 +328,14 @@ else
 		printf 'stylesheet = +./%s-sty.css\n' "$t" \
 			> "$C/themes/$t/stylers/sty/theme-styler.conf"
 		printf '/* %s sty */\n' "$t" > "$C/themes/$t/stylers/sty/$t-sty.css"
+		# `features` down the same chain: base sets, the others add. This is
+		# what replaced the hardcoded theme.yaml lookup, and it uses the same
+		# `+`/replace grammar as `stylesheet`.
+		if [ "$t" = base ]; then
+			printf 'features = %s-feat\n' "$t" >> "$C/themes/$t/theme.conf"
+		else
+			printf 'features = +%s-feat\n' "$t" >> "$C/themes/$t/theme.conf"
+		fi
 		prev=$t
 	done
 
@@ -351,12 +359,13 @@ else
 		stage_mirror_all "$CHAIN" eng sty "$P2" >/dev/null 2>&1
 
 	cat > "$BASE/ask.mjs" <<JSEOF
-import { stylesheets, markup, engineOf } from '$REPO/engines/vivlio/_nopayload/payload.js';
+import { stylesheets, markup, engineOf, features } from '$REPO/engines/vivlio/_nopayload/payload.js';
 const P = '$P2';
 const { id, styler } = engineOf(P);
 console.log([id, styler].join(' '));
 console.log(stylesheets(P, id, styler).map(s => s.split('/').pop()).join(' '));
 console.log((markup(P) || '').split('/').pop());
+console.log(features(P));
 JSEOF
 
 	JS=$(bun run "$BASE/ask.mjs" 2>"$BASE/ask.err")
@@ -371,6 +380,22 @@ JSEOF
 
 	ok "and finds the declared markup, not a fixed name" "markup.html" \
 	   "$(printf '%s\n' "$JS" | sed -n 3p)"
+
+	# `features` accumulates root-first, so the leaf's addition comes last.
+	# This replaced a `theme.yaml` at the payload root that nothing declared:
+	# engines/vivlio looked it up by name, and no shipped theme ever had one.
+	ok "features accumulate down the chain" "base-feat mid-feat leaf-feat" \
+	   "$(printf '%s\n' "$JS" | sed -n 4p)"
+
+	# And a BARE value replaces everything the chain accumulated, exactly as it
+	# does for stylesheets. Without this the `+` could be ignored entirely and
+	# the test above would still pass.
+	printf 'features = only-this\n' >> "$P2/input/themes/leaf/theme.conf"
+	ok "a bare value replaces what the chain accumulated" "only-this" \
+	   "$(bun run "$BASE/ask.mjs" 2>/dev/null | sed -n 4p)"
+	# Put the payload back, so anything after this sees the fixture as built.
+	sed -i.bak '/^features = only-this$/d' "$P2/input/themes/leaf/theme.conf"
+	rm -f "$P2/input/themes/leaf/theme.conf.bak"
 
 	# --- and the payload's own reader ---------------------------------------
 	#

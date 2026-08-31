@@ -45,7 +45,7 @@ import puppeteer from 'puppeteer-core';
 
 // The payload reader: what the staged directory says it contains. Local to
 // this engine rather than a dependency -- it reads conf files and nothing else.
-import { markup, stylesheets, engineOf } from './payload.js';
+import { markup, stylesheets, engineOf, features } from './payload.js';
 
 
 // Paths
@@ -247,20 +247,16 @@ function buildHtml(mdSource, inputBase, payloadDir, extraCss) {
 
   const meta = normaliseMeta(merged);
 
-  // A theme's own defaults for pdfulator_features. Looked up by NAME, which is
-  // the last such lookup in this file -- theme.yaml is still in stage.sh's
-  // STAGE_FILES, no shipped theme has one, and nothing declares it in a conf.
-  // PAYLOAD-PLAN commit 4 territory: it should be a theme.conf key.
-  const themeConfigPath = path.join(payloadDir, 'theme.yaml');
-  if (!meta.pdfulator_features && fs.existsSync(themeConfigPath)) {
-    try {
-      const tc = yaml.load(fs.readFileSync(themeConfigPath, 'utf8')) || {};
-      if (tc.pdfulator_features) {
-        meta.pdfulator_features = Array.isArray(tc.pdfulator_features)
-          ? tc.pdfulator_features.join(' ')
-          : tc.pdfulator_features;
-      }
-    } catch { /* ignore */ }
+  // A theme's own default features, from theme.conf's `features` key, walked
+  // down the chain like everything else. The document's own pdfulator_features
+  // still wins: a theme supplies a default, it does not impose one.
+  //
+  // This used to read a `theme.yaml` at the payload root -- a filename nothing
+  // declared and no shipped theme had, and the last by-name lookup left in this
+  // file.
+  if (!meta.pdfulator_features) {
+    const themeFeatures = features(payloadDir);
+    if (themeFeatures) meta.pdfulator_features = themeFeatures;
   }
 
   const renderedBody = md.render(body);
