@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>$title$</title>
-  <link rel="stylesheet" href="/theme/fonts.css">
-  <link rel="stylesheet" href="/theme/print.css">
-  <link rel="stylesheet" href="/theme/logo.css">
+$for(pdfulator_stylesheet)$
+  <link rel="stylesheet" href="$pdfulator_stylesheet$">
+$endfor$
 </head>
 <body class="$pdfulator_features$">
   <article>
