@@ -122,25 +122,25 @@ printf '/* engine */\n' > "$R/engines/eng/engine.css"
 printf '#!/bin/sh\n'    > "$R/engines/eng/convert"
 printf 'runtime\n'      > "$R/engines/eng/_nopayload/main.js"
 
-printf 'template.structure = ./markup.html\n' > "$R/templates/tmpl/template.conf"
+printf 'markup = ./markup.html\n' > "$R/templates/tmpl/template.conf"
 printf '<html></html>\n'                      > "$R/templates/tmpl/markup.html"
 
-printf 'name = base\ntemplate.styling = ./base.css\n' > "$R/themes/base/theme.conf"
+printf 'name = base\nstylesheet = ./base.css\n' > "$R/themes/base/theme.conf"
 printf '/* base */\n'                                 > "$R/themes/base/base.css"
 
 # Contributes no stylesheet at all -- only its place in the chain.
 printf 'name = mid\nextends = base\n' > "$R/themes/mid/theme.conf"
 
 printf 'name = leaf\nextends = mid\n' > "$R/themes/leaf/theme.conf"
-printf 'template.styling = +./leaf-sty.css\n' \
+printf 'stylesheet = +./leaf-sty.css\n' \
 	> "$R/themes/leaf/stylers/sty/theme-styler.conf"
 printf '/* leaf styler */\n' > "$R/themes/leaf/stylers/sty/leaf-sty.css"
 # A styler that was NOT chosen, to prove the sub-axis is a selection.
-printf 'template.styling = +./other.css\n' \
+printf 'stylesheet = +./other.css\n' \
 	> "$R/themes/leaf/stylers/other/theme-styler.conf"
 printf '/* other styler */\n' > "$R/themes/leaf/stylers/other/other.css"
 # An engine axis that WAS chosen.
-printf 'template.styling = +./leaf-eng.css\n' \
+printf 'stylesheet = +./leaf-eng.css\n' \
 	> "$R/themes/leaf/engines/eng/theme-engine.conf"
 printf '/* leaf engine */\n' > "$R/themes/leaf/engines/eng/leaf-eng.css"
 
@@ -303,10 +303,10 @@ else
 	# and an implementation that omits the band entirely passes. That is not
 	# hypothetical -- lib/styling.sh omitted it while payload.js did not, and
 	# this comparison stayed green throughout.
-	printf 'id=eng\ntemplate=tmpl\nstyler=sty\ntemplate.styling = +./engine.css\n' \
+	printf 'id=eng\ntemplate=tmpl\nstyler=sty\nstylesheet = +./engine.css\n' \
 		> "$C/engines/eng/engine.conf"
 	printf '/* engine */\n' > "$C/engines/eng/engine.css"
-	printf 'template.structure = ./markup.html\n' > "$C/templates/tmpl/template.conf"
+	printf 'markup = ./markup.html\n' > "$C/templates/tmpl/template.conf"
 	printf '<html></html>\n' > "$C/templates/tmpl/markup.html"
 
 	prev=""
@@ -315,17 +315,17 @@ else
 		{
 			printf 'name = %s\n' "$t"
 			[ -n "$prev" ] && printf 'extends = %s/themes/%s\n' "$C" "$prev"
-			printf 'template.styling = +./%s.css\n' "$t"
+			printf 'stylesheet = +./%s.css\n' "$t"
 		} > "$C/themes/$t/theme.conf"
 		printf '/* %s */\n' "$t" > "$C/themes/$t/$t.css"
 		# A SECOND sheet on the same object, so that `+` adding and a bare
 		# value replacing are distinguishable. With one sheet per object both
 		# readings give the same list, and a reader that ignored `+` entirely
 		# would pass.
-		printf 'template.styling = +./%s-extra.css\n' "$t" \
+		printf 'stylesheet = +./%s-extra.css\n' "$t" \
 			>> "$C/themes/$t/theme.conf"
 		printf '/* %s extra */\n' "$t" > "$C/themes/$t/$t-extra.css"
-		printf 'template.styling = +./%s-sty.css\n' "$t" \
+		printf 'stylesheet = +./%s-sty.css\n' "$t" \
 			> "$C/themes/$t/stylers/sty/theme-styler.conf"
 		printf '/* %s sty */\n' "$t" > "$C/themes/$t/stylers/sty/$t-sty.css"
 		prev=$t

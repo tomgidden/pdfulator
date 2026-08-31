@@ -14,7 +14,7 @@
 #     grandparent theme,        parent theme,        theme
 #     grandparent theme-engine, parent theme-engine, theme-engine
 #     grandparent theme-styler, parent theme-styler, theme-styler
-#     document metadata   (template.styling = +... in the document's YAML)
+#     document metadata   (stylesheet = +... in the document's YAML)
 #     command line        (--css)                          (highest)
 #
 # Tom's reasoning, and it generalises to any axis added later: an object's X
@@ -98,16 +98,16 @@ styling_level_name() {  # styling_level_name <number>
 }
 
 
-# Resolve one `template.styling` value against the file that declared it.
+# Resolve one `stylesheet` value against the file that declared it.
 #
 #   styling_resolve <value> <base-dir>
 #
 # A leading `+` means ADD rather than replace, and is stripped here: by the
 # time a value reaches this function the caller has already decided what the
 # marker means for its list. The `+` lives on the value rather than the key
-# because conf_get splits on the first `=` -- `template.styling += x` parses as
-# the key `template.styling ` with the `+` orphaned, whereas
-# `template.styling = +x` needs no grammar change at all.
+# because conf_get splits on the first `=` -- `stylesheet += x` parses as
+# the key `stylesheet ` with the `+` orphaned, whereas
+# `stylesheet = +x` needs no grammar change at all.
 #
 # Paths are relative to the file that defined them, never to the caller's
 # working directory, which is why <base-dir> is required rather than assumed.
@@ -144,7 +144,7 @@ styling_resolve() {  # styling_resolve <value> <base-dir>
 #   styling_is_add <value>
 #
 # Returns 0 (true) for `+foo.css`, 1 for `foo.css`. A plain value replacing its
-# level is what makes `template.styling = mine.css` mean "mine, and nothing the
+# level is what makes `stylesheet = mine.css` mean "mine, and nothing the
 # parent had" -- the same wholesale-replace reading fonts.conf uses per role.
 styling_is_add() {  # styling_is_add <value>
 	case ${1:-} in
@@ -165,7 +165,7 @@ styling_is_add() {  # styling_is_add <value>
 #
 #   - it is simply called print.css and sits there. That is how every theme
 #     written before this file existed works, and it keeps working.
-#   - template.styling names it, which is how a theme adds a second sheet, or
+#   - stylesheet names it, which is how a theme adds a second sheet, or
 #     names one thing while shipping several.
 #
 # A declaration REPLACES what the axis had so far unless it is marked `+`, so a
@@ -207,10 +207,10 @@ styling_axis() {  # styling_axis <chain> <subdir> <conf> <level>
 		# A declaration, if there is one, decides this theme's contribution and
 		# suppresses the conventional filename: a theme that says what its
 		# styling is has said it, and silently appending print.css as well
-		# would make `template.styling = only-this.css` untrue.
+		# would make `stylesheet = only-this.css` untrue.
 		_sa_declared=0
 		if [ -f "$_sa_where/$_sa_conf" ]; then
-			_sa_vals=$(conf_get_all "$_sa_where/$_sa_conf" template.styling)
+			_sa_vals=$(conf_get_all "$_sa_where/$_sa_conf" stylesheet)
 			if [ -n "$_sa_vals" ]; then
 				_sa_declared=1
 				# A leading unmarked value replaces everything accumulated so
@@ -289,7 +289,7 @@ styling_list() {  # styling_list <chain> <engine> <styler> <engine-dir> [css]
 	# stylesheet silently absent under one engine and present under another is
 	# the failure that was waiting.
 	if [ -n "$_sl_enginedir" ] && [ -f "$_sl_enginedir/engine.conf" ]; then
-		conf_get_all "$_sl_enginedir/engine.conf" template.styling | \
+		conf_get_all "$_sl_enginedir/engine.conf" stylesheet | \
 		while IFS= read -r _sl_v || [ -n "$_sl_v" ]; do
 			[ -n "$_sl_v" ] || continue
 			_sl_f=$(styling_resolve "$_sl_v" "$_sl_enginedir") || exit 1
@@ -305,7 +305,7 @@ styling_list() {  # styling_list <chain> <engine> <styler> <engine-dir> [css]
 	_sl_tdir=$(template_select "$_sl_chain" "$_sl_engine" "$_sl_styler" \
 		"$_sl_enginedir") || return 1
 	if [ -n "$_sl_tdir" ] && [ -f "$_sl_tdir/template.conf" ]; then
-		conf_get_all "$_sl_tdir/template.conf" template.styling | \
+		conf_get_all "$_sl_tdir/template.conf" stylesheet | \
 		while IFS= read -r _sl_v || [ -n "$_sl_v" ]; do
 			[ -n "$_sl_v" ] || continue
 			_sl_f=$(styling_resolve "$_sl_v" "$_sl_tdir") || exit 1

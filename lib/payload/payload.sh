@@ -184,14 +184,14 @@ cmd_markup() {  # cmd_markup <payload>
 	_cm_t=$(p_template "$1")
 	[ -n "$_cm_t" ] || return 0
 
-	# JS: confGet(path.join(tdir, 'template.conf'), 'template.structure')
+	# JS: confGet(path.join(tdir, 'template.conf'), 'markup')
 	#     if (!ref) return ''
-	_cm_ref=$(conf_get "$_cm_t/template.conf" template.structure 2>/dev/null || printf '')
+	_cm_ref=$(conf_get "$_cm_t/template.conf" markup 2>/dev/null || printf '')
 	[ -n "$_cm_ref" ] || return 0
 
 	# JS: resolveRef(ref, tdir) -- absolute stays, relative joins to the
 	# declaring file's own directory. resolveRef also strips a leading `+`;
-	# here it cannot appear, because `template.structure` is a single value
+	# here it cannot appear, because `markup` is a single value
 	# rather than a list and `+` has no meaning on one. If that ever changes,
 	# both sides change together.
 	case $_cm_ref in

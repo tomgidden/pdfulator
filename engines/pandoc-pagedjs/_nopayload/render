@@ -42,7 +42,7 @@ FORMAT=commonmark_x-raw_html+task_lists+definition_lists
 # The payload names its own structural file in templates/<id>/template.conf,
 # and _lib/payload.sh reads it -- the same reader, at the same revision, that
 # the wrapper used to assemble the payload, because it travels inside it. That
-# replaces looking for `article.tmpl` at the payload root, which was a leftover
+# replaces looking for a template at an agreed name at the payload root, a leftover
 # from when the mounted directory WAS the theme and is the by-name coupling
 # that once let a Mustache template reach pandoc.
 #
@@ -56,7 +56,7 @@ FORMAT=commonmark_x-raw_html+task_lists+definition_lists
 # shell is not already ignoring the status -- it exits silently: no message, no
 # non-zero status the caller can see a reason for. Three bugs in lib/browser.sh
 # were exactly this shape (daf9507).
-TEMPLATE=$ENGINE/article.tmpl
+TEMPLATE=$ENGINE/template.html.pandoc
 if [ -x "$theme/_lib/payload.sh" ]; then
 	# Relative to the payload, so it is correct at whatever path the payload
 	# was mounted at. `|| :` because a payload naming no template is not an

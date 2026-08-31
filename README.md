@@ -435,8 +435,8 @@ plain rule the theme in front of you just wrote.
 say nothing. To use a different file, or several, name them in `theme.conf`:
 
 ```
-template.styling = ./base.css       # replaces what the parents contributed
-template.styling = +./extra.css     # adds to it
+stylesheet = ./base.css       # replaces what the parents contributed
+stylesheet = +./extra.css     # adds to it
 ```
 
 A leading `+` adds; without it the value replaces everything that level had so

@@ -71,9 +71,9 @@ setup() {
 	mkdir -p "$BASE/templates/mustache" "$BASE/templates/pandoc"
 	echo 'MUSTACHE-TMPL' > "$BASE/templates/mustache/article.tmpl"
 	echo 'PANDOC-TMPL'   > "$BASE/templates/pandoc/article.tmpl"
-	printf 'template.structure = ./article.tmpl\n' \
+	printf 'markup = ./article.tmpl\n' \
 		> "$BASE/templates/mustache/template.conf"
-	printf 'template.structure = ./article.tmpl\n' \
+	printf 'markup = ./article.tmpl\n' \
 		> "$BASE/templates/pandoc/template.conf"
 	TEMPLATES_DIR="$BASE/templates"
 
@@ -147,18 +147,18 @@ ok "a theme's stray article.tmpl does not reach another ecosystem" "PANDOC-TMPL"
 	"$(cat "$dp2/$(staged_markup "$dp2")" 2>/dev/null)"
 rm -f "$BASE/themes/derived/article.tmpl"
 
-# A template's support files land beside its structure. The DocBook template
+# A template's support files land beside its markup. The DocBook template
 # needs global.ent there, because the SYSTEM entity that pulls it in resolves
 # relative to the template -- staged without it, pandoc fails on the DTD subset
 # before the conversion starts.
 echo 'ENTITIES' > "$BASE/templates/pandoc/extra.ent"
-printf 'template.structure = ./article.tmpl\ntemplate.support = ./extra.ent\n' \
+printf 'markup = ./article.tmpl\ntemplate.support = ./extra.ent\n' \
 	> "$BASE/templates/pandoc/template.conf"
 ds=$(stage_dir "$BASE/themes/derived" pandoc-pagedjs pagedjs) || ds=""
-# Beside the structure in the mirror, which is the position that matters: a
+# Beside the markup in the mirror, which is the position that matters: a
 # SYSTEM entity resolves relative to the file naming it, so the support file has
 # to sit next to the template wherever the template actually is.
-ok "a support file is staged beside the structure" "ENTITIES" \
+ok "a support file is staged beside the markup" "ENTITIES" \
 	"$(cat "$(dirname -- "$ds/$(staged_markup "$ds")")/extra.ent" 2>/dev/null)"
 
 # The legacy root copy is gone, and must stay gone: an engine that found

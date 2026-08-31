@@ -25,8 +25,8 @@
 #
 #   <kind>  <level>  <level-name>  <path>
 #
-# <kind> is what the row is for -- `styling` for a stylesheet, `structure` for
-# the template's structural file. <level> and <level-name> are set for styling
+# <kind> is what the row is for -- `styling` for a stylesheet, `markup` for
+# the template's markup file. <level> and <level-name> are set for styling
 # rows and empty otherwise. <path> is always relative to the staged directory,
 # so it survives a mount or a transfer.
 #
@@ -163,7 +163,7 @@ stage_key() {  # stage_key <chain> <engine> <styler> [css]
 		if [ -n "$_sk_tdir" ]; then
 			printf '%s\n' "$_sk_tdir"
 			for _sk_tf in "$_sk_tdir/template.conf" \
-				"$(template_structure "$_sk_tdir" 2>/dev/null)" \
+				"$(template_markup "$_sk_tdir" 2>/dev/null)" \
 				$(template_support "$_sk_tdir" 2>/dev/null); do
 				if [ -n "$_sk_tf" ] && [ -f "$_sk_tf" ]; then
 					printf '%s %s\n' "$_sk_tf" "$(conf_hash_file "$_sk_tf")"
@@ -401,14 +401,16 @@ stage_dir() {  # stage_dir <theme-dir> <engine> <styler> [font-base] [css]
 #   stage_template <chain> <engine> <styler> <staged-dir>
 #
 # The template is selected by ecosystem rather than copied by name, which is
-# the whole point of the object: engines/pandoc-* and engines/vivlio* want a
-# file called article.tmpl, but they want *different* article.tmpls, and the
-# old by-name staging could not tell them apart.
+# the whole point of the object: engines/pandoc-* and engines/vivlio* each want
+# a markup file, but they want *different* ones -- Mustache for the vivlio
+# pair, pandoc's own `$var$` for the others -- and the old by-name staging
+# could not tell them apart.
 #
-# It is staged under the template's own basename, so the engine side is
-# unchanged -- pandoc's render still reads `article.tmpl` out of the theme
-# directory, and the XSLT one still reads `global.tmpl`. What changed is which
-# file arrives under that name.
+# It is staged under the template's own basename. That basename now says which
+# ecosystem it belongs to (`template.html.mustache`, `template.html.pandoc`,
+# `template.xml.pandoc`), so a file that reaches the wrong engine is visible on
+# sight rather than only in the rendered PDF. No engine looks it up by name any
+# more -- they ask the payload -- so the name is documentation, not contract.
 #
 # An engine that names no template stages nothing and falls back to its own
 # built-in, which is what the null engine does and what any future engine with
@@ -425,7 +427,7 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 		"$_stt_enginedir") || return 1
 	[ -n "$_stt_tmpl" ] || return 0
 
-	_stt_src=$(template_structure "$_stt_tmpl") || return 1
+	_stt_src=$(template_markup "$_stt_tmpl") || return 1
 	[ -n "$_stt_src" ] || return 0
 
 	# Mirrored, like the stylesheets, so a template that pulls in a partial or
@@ -436,7 +438,7 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 	_stt_name=$(basename -- "$_stt_src")
 	cp -- "$_stt_src" "$_stt_out/input/$_stt_rel/$_stt_name" || return 1
 
-	# Whatever the structure needs beside it. The DocBook template pulls in
+	# Whatever the markup needs beside it. The DocBook template pulls in
 	# global.ent through a SYSTEM entity, which resolves relative to the
 	# template's own location -- so staging the template alone gives pandoc a
 	# DTD subset pointing at a file that is not there.
@@ -452,7 +454,7 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 	# right file under the expected name fixed the symptom but kept the
 	# coupling, and with it the requirement that every ecosystem agree on a
 	# filename. Naming the file here removes it.
-	stage_manifest_add "$_stt_out" structure "" "" \
+	stage_manifest_add "$_stt_out" markup "" "" \
 		"input/$_stt_rel/$_stt_name" || return 1
 
 	# NO LEGACY COPY AT THE ROOT ANY MORE. Every engine now asks the payload
@@ -477,7 +479,7 @@ stage_template() {  # stage_template <chain> <engine> <styler> <staged-dir>
 #
 # One file describing everything an engine might need to find, rather than a
 # convention per file type. <kind> says what the row is -- `styling` for a
-# stylesheet, `structure` for the template's structural file -- and <path> is
+# stylesheet, `markup` for the template's markup file -- and <path> is
 # always relative to the staged directory, so it stays correct through a mount
 # or a transfer.
 stage_manifest_add() {  # stage_manifest_add <dir> <kind> <level> <name> <path>

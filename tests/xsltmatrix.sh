@@ -39,7 +39,7 @@ fi
 echo "============ WELL-FORMED ============"
 # xsltproc rejects the whole stylesheet on any XML error, so a stray "--"
 # inside a comment takes the engine down entirely.
-for f in fo.xsl titlepages.xsl fop.xconf global.tmpl; do
+for f in fo.xsl titlepages.xsl fop.xconf template.xml.pandoc; do
 	check "$f is well-formed XML" "0" \
 	      "$(xmllint --noout "$ENGINE/xsl/$f" >/dev/null 2>&1; echo $?)"
 done
