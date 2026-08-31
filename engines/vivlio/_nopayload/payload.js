@@ -321,6 +321,41 @@ function sheetsOf(dir) {
 }
 
 
+
+// The features a theme declares, as a space-separated string.
+//
+//   theme.conf:  features = shade_monospace justify
+//                features = +narrow_monospace      adds to what a parent set
+//
+// Same grammar as `stylesheet`: `+` adds, a bare value replaces everything the
+// chain accumulated, and the chain is walked root-first so a child wins. That
+// is what makes `features = justify` in a leaf theme mean "justify, and none of
+// what my parents asked for" -- the same thing it means for stylesheets.
+//
+// This REPLACED a hardcoded `theme.yaml` lookup. Nothing declared that file, no
+// shipped theme had one, and it was the last by-name lookup in main.js: an
+// engine reading a filename nobody had agreed on, which is the coupling this
+// whole plan exists to remove. A document's own pdfulator_features still wins
+// over any of this -- the theme is only supplying a default.
+//
+// sh: no counterpart. lib/payload/payload.sh answers `markup` and `engine`
+// only, and adding a third command needs a consumer first (see the comment at
+// the top of that file). The pandoc engines get features through their Lua
+// filter from document metadata, and no shipped theme declares any.
+export function features(payload) {
+  let out = '';
+  for (const dir of themeChain(payload)) {
+    for (const value of confGetAll(path.join(dir, 'theme.conf'), 'features')) {
+      if (!value) continue;
+      const v = stripAdd(value).trim();
+      if (!v) continue;
+      out = isAdd(value) ? (out ? out + ' ' + v : v) : v;
+    }
+  }
+  return out;
+}
+
+
 // Every stylesheet that applies, lowest priority first.
 //
 // THE ORDER IS §5's, AND IT IS AXIS-OUTER / CHAIN-INNER:

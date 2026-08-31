@@ -105,7 +105,13 @@
 # pandoc received a template in a syntax it does not know and printed the
 # markup into the PDF as text. A template now arrives via the template object,
 # which knows which ecosystem it belongs to. See stage_template below.
-STAGE_FILES="metadata.lua theme.yaml fo.xsl \
+#
+# `theme.yaml` is gone from this list. It held a theme's default
+# pdfulator_features, found by name at the payload root by engines/vivlio --
+# a filename nothing declared and no shipped theme ever had. It is now
+# `features` in theme.conf, resolved down the chain with the same `+`/replace
+# grammar as `stylesheet`, and the conf files are mirrored anyway.
+STAGE_FILES="metadata.lua fo.xsl \
              logo.svg logo.png logo.jpg logo.jpeg logo.webp"
 
 # Files that *are* a cascade: concatenated root-first, so a child's rules come

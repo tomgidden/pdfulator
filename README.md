@@ -527,6 +527,15 @@ pdfulator_features:
 
 The document metadata [see above](#document-metadata) can include a `pdfulator_features` line or list that contains a few optional choices controlling formatting.  These can be left in but ignored (ie. disabled) by prefixing them with `no_`, or just removing them.
 
+A theme can supply defaults for these, in its `theme.conf`:
+
+```
+features = shade_monospace justify
+features = +narrow_monospace      # adds to what a parent theme set
+```
+
+The same `+`/replace grammar as `stylesheet`: a bare value replaces everything the parent themes accumulated, `+` adds to it. A document's own `pdfulator_features` overrides the theme entirely — the theme supplies a default, it does not impose one.
+
 These include:
 
 - `wide` - Don't indent the main body text. This gives extra space, useful especially for pre- and code-blocks, but at the expense of the left margin.
