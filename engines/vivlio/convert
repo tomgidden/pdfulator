@@ -1,7 +1,7 @@
 #!/bin/sh
 # The vivlio engine's convert step.
 #
-#   convert <input|-> <output|-> <theme-dir>
+#   convert <input|-> <output|-> <payload-dir>
 #
 # A thin shim: the work is main.js, and this exists to launch it on whichever
 # JS runtime the wrapper settled on. That choice is the wrapper's because it

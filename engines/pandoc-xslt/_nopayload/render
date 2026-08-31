@@ -1,7 +1,7 @@
 #!/bin/sh
 # The conversion, as it runs *inside* the image.
 #
-#   render <input|-> <output|-> <theme-dir>
+#   render <input|-> <output|-> <payload-dir>
 #
 # Four formats, three tools:
 #
@@ -16,7 +16,7 @@ ENGINE=/engine
 
 in=${1:--}
 out=${2:--}
-theme=${3:-/theme}
+payload=${3:-/payload}
 
 # The DocBook XSL stylesheets resolve their imports through the XML catalog
 # rather than over the network -- fo.xsl imports
@@ -25,11 +25,11 @@ theme=${3:-/theme}
 # container with no network hangs until it times out.
 export XML_CATALOG_FILES="/etc/xml/catalog /usr/local/etc/xml/catalog"
 
-# A theme may override any of the three stages. Checked per run, since the
-# theme is mounted at run time and the image cannot know what is in it.
+# The payload may override any of the three stages. Checked per run, since it
+# is mounted at run time and the image cannot know what is in it.
 #
 # `if`, not `[ ... ] && ...`: under set -e a bare test that fails is a failing
-# command, and a theme supplying none of these is the common case.
+# command, and a payload supplying none of these is the common case.
 # The template, asked for rather than guessed: the payload names its own
 # structural file and _lib/payload.sh reads it. See the same block in
 # pandoc-pagedjs/render. The engine's own copy is the fallback for a bare
@@ -42,24 +42,24 @@ export XML_CATALOG_FILES="/etc/xml/catalog /usr/local/etc/xml/catalog"
 # is exactly the indirection this mechanism exists to allow: the template says
 # where its markup is, and it need not be under templates/.
 TEMPLATE=$ENGINE/xsl/template.xml.pandoc
-if [ -x "$theme/_lib/payload.sh" ]; then
-	_markup=$(sh "$theme/_lib/payload.sh" markup "$theme" 2>/dev/null || :)
-	if [ -n "$_markup" ] && [ -f "$theme/$_markup" ]; then
-		TEMPLATE=$theme/$_markup
+if [ -x "$payload/_lib/payload.sh" ]; then
+	_markup=$(sh "$payload/_lib/payload.sh" markup "$payload" 2>/dev/null || :)
+	if [ -n "$_markup" ] && [ -f "$payload/$_markup" ]; then
+		TEMPLATE=$payload/$_markup
 	fi
 fi
 
 STYLESHEET=$ENGINE/xsl/fo.xsl
-if [ -f "$theme/fo.xsl" ]; then STYLESHEET=$theme/fo.xsl; fi
+if [ -f "$payload/fo.xsl" ]; then STYLESHEET=$payload/fo.xsl; fi
 
-# The staged theme's generated font configuration is preferred over the
-# engine's, and a theme's own hand-written fop.xconf over both.
+# The payload's generated font configuration is preferred over the engine's,
+# and a theme's own hand-written fop.xconf, mirrored into it, over both.
 FOPCONF=$ENGINE/xsl/fop.xconf
-if [ -f "$theme/fop-fonts.xconf" ]; then FOPCONF=$theme/fop-fonts.xconf; fi
-if [ -f "$theme/fop.xconf" ]; then FOPCONF=$theme/fop.xconf; fi
+if [ -f "$payload/fop-fonts.xconf" ]; then FOPCONF=$payload/fop-fonts.xconf; fi
+if [ -f "$payload/fop.xconf" ]; then FOPCONF=$payload/fop.xconf; fi
 # Absolute, because FOP is run from the scratch directory (see stage 3) and a
 # relative config path would then resolve against the wrong place. A mounted
-# theme arrives as an absolute path already; this covers the case where one
+# payload arrives as an absolute path already; this covers the case where one
 # does not.
 case $FOPCONF in
 	/*) ;;
@@ -70,8 +70,8 @@ FILTERS=""
 if [ -f "$ENGINE/metadata.lua" ]; then
 	FILTERS="$FILTERS --lua-filter=$ENGINE/metadata.lua"
 fi
-if [ -f "$theme/metadata.lua" ]; then
-	FILTERS="$FILTERS --lua-filter=$theme/metadata.lua"
+if [ -f "$payload/metadata.lua" ]; then
+	FILTERS="$FILTERS --lua-filter=$payload/metadata.lua"
 fi
 
 WORK=$(mktemp -d /work/pdfulator.XXXXXX)
@@ -137,7 +137,7 @@ perl -pi -e 's/(<programlisting[^\n]+)\n/$1/g;' "$WORK/$leaf.xml"
 #
 # --path is how the stylesheet finds titlepages.xsl and the rest beside it.
 #
-# The font parameters come from the staged theme's fo-params, a role-per-line
+# The font parameters come from the payload's fo-params, a role-per-line
 # file the wrapper generated from fonts.conf. fo.xsl has always parameterised
 # its families -- serif.font.family and the rest are xsl:param -- but nothing
 # ever passed them, so a theme could only change a font by replacing the whole
@@ -150,7 +150,7 @@ perl -pi -e 's/(<programlisting[^\n]+)\n/$1/g;' "$WORK/$leaf.xml"
 # to avoid. "$@" carries the spaces in "TeX Gyre Pagella" without any quoting
 # for the shell to get wrong.
 set --
-if [ -f "$theme/fo-params" ]; then
+if [ -f "$payload/fo-params" ]; then
 	while IFS="$(printf '\t')" read -r _role _family || [ -n "$_role" ]; do
 		[ -n "$_role" ] || continue
 		[ -n "$_family" ] || continue
@@ -161,27 +161,27 @@ if [ -f "$theme/fo-params" ]; then
 			*)       continue ;;
 		esac
 		set -- "$@" --stringparam "$_p" "$_family"
-	done < "$theme/fo-params"
+	done < "$payload/fo-params"
 fi
 
 # The logo, the same way. fo.xsl already has a header.image.filename param and
 # a header template that switches on position, so a theme's declared logo needs
 # no XSL of its own -- which is the point of declaring it rather than making
 # every theme ship a stylesheet.
-if [ -f "$theme/logo-params" ]; then
+if [ -f "$payload/logo-params" ]; then
 	while IFS="$(printf '\t')" read -r _key _val || [ -n "$_key" ]; do
 		[ -n "$_key" ] && [ -n "$_val" ] || continue
 		case $_key in
 			file)
 				# Absolute, because FOP resolves a relative path against
-				# <base> rather than against the theme.
-				set -- "$@" --stringparam header.image.filename "$theme/$_val"
+				# <base> rather than against the payload.
+				set -- "$@" --stringparam header.image.filename "$payload/$_val"
 				;;
 			position)
 				set -- "$@" --stringparam header.image.position "$_val"
 				;;
 		esac
-	done < "$theme/logo-params"
+	done < "$payload/logo-params"
 fi
 
 xsltproc --xinclude --nonet \

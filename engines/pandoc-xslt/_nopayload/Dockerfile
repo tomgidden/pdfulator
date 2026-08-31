@@ -5,7 +5,7 @@
 #
 # Built from the repository root for consistency with the other engines, though
 # this one needs nothing from above its own directory: the stylesheets are its
-# own, and its fonts arrive at run time in the theme the wrapper stages and
+# own, and its fonts arrive at run time in the payload the wrapper stages and
 # mounts, exactly as they do for the browser engines.
 FROM debian:12-slim
 
@@ -69,16 +69,16 @@ RUN set -eu; \
 
 # The engine's assets: the stylesheets, the fonts they name, the pandoc
 # template that produces DocBook, and the lua filter that fills in the year.
-# All the engine's own. No fonts among them: those belong to the theme, which
+# All the engine's own. No fonts among them: those belong to the payload, which
 # is mounted, and the wrapper generates the FOP configuration that names them
 # (see fonts_fop_xconf and the fop-fonts.xconf that `render` prefers).
 COPY engines/pandoc-xslt/xsl        /engine/xsl
 COPY engines/pandoc-xslt/_nopayload/metadata.lua /engine/metadata.lua
 
-# The built-in theme, so the image works with no mounts at all.
-# The fallback theme, for a run that supplies none. Normally the wrapper
+# The built-in fallback, so the image works with no mounts at all.
+# For a run that supplies no payload. Normally the wrapper
 # stages one and mounts it over this.
-COPY themes/default /theme
+COPY themes/default /payload
 
 # /work is 1777 rather than owned by a user: the wrapper passes the caller's
 # uid, which exists in no /etc/passwd here and so cannot write a directory
@@ -90,9 +90,9 @@ COPY --chmod=755 engines/pandoc-xslt/_nopayload/render /usr/local/bin/render
 
 WORKDIR /work
 
-# The engine contract: <input|-> <output|-> <theme-dir>, defaulting to
-# stdin -> stdout with the built-in theme, so the image is usable bare:
+# The engine contract: <input|-> <output|-> <payload-dir>, defaulting to
+# stdin -> stdout with the built-in fallback, so the image is usable bare:
 #
 #   docker run --rm --init -i tomgidden/pdfulator:pandoc-xslt < in.md > out.pdf
 ENTRYPOINT ["/usr/local/bin/render"]
-CMD ["-", "-", "/theme"]
+CMD ["-", "-", "/payload"]

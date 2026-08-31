@@ -5,7 +5,7 @@
 #   docker build -f engines/vivlio-docker/Dockerfile -t tomgidden/pdfulator:vivlio .
 #
 # because the image needs three things that live above it -- the vivlio
-# engine's main.js and lockfile, and the built-in theme/ and themes/. A
+# engine's main.js and lockfile, and the built-in payload/ and themes/. A
 # Dockerfile beside its own context would mean duplicating those into this
 # directory, and a duplicated theme is one that silently drifts.
 #
@@ -43,13 +43,13 @@ WORKDIR /app
 COPY engines/vivlio/_nopayload/package.json engines/vivlio/_nopayload/bun.lock ./
 RUN bun install --frozen-lockfile
 
-# The built-in theme, then the engine itself.
+# The built-in fallback payload, then the engine itself.
 #
 # There is no defaults/ any more: the stylesheet, template and fonts that lived
-# there are themes now, and the wrapper stages a theme into one directory and
+# there are themes now, and the wrapper stages a payload into one directory and
 # mounts it. An image carrying its own copy would be a second opinion about
 # what a document should look like.
-# themes/ so a `--theme classic` works inside the image too; theme/ is the
+# themes/ so a `--theme classic` works inside the image too; payload/ is the
 # fallback for a run that supplies none, and is themes/default.
 #
 # The built-in fallback for a bare `docker run` with no mounts. It is NOT a
@@ -61,7 +61,7 @@ RUN bun install --frozen-lockfile
 # container can name any shipped theme.
 COPY themes         ./themes
 COPY templates      ./templates
-COPY themes/default ./theme
+COPY themes/default ./payload
 
 # The engine: main.js and the modules it imports. payload.js reads a staged
 # payload's conf files, and is a separate file rather than part of main.js
@@ -73,21 +73,21 @@ COPY engines/vivlio/_nopayload/payload.js ./
 # so that a container writing an output file into /out can do so without the
 # mount having to be world-writable on the host.
 #
-#   /in     the document (read-only when the wrapper mounts it)
-#   /out    where the PDF goes
-#   /theme  the theme directory, when it isn't the built-in one
-RUN mkdir -p /in /out /theme && chown bun:bun /in /out /theme
+#   /in       the document (read-only when the wrapper mounts it)
+#   /out      where the PDF goes
+#   /payload  the payload, when it isn't the built-in one
+RUN mkdir -p /in /out /payload && chown bun:bun /in /out /payload
 
 USER bun
 
-# The engine contract, verbatim: <input|-> <output|-> <theme-dir>.
+# The engine contract, verbatim: <input|-> <output|-> <payload-dir>.
 #
 # The default arguments are what makes the image usable with no wrapper and no
 # installer at all:
 #
 #   docker run --rm --init -i tomgidden/pdfulator:vivlio < in.md > out.pdf
 #
-# stdin to stdout with the built-in theme. The wrapper overrides all three with
-# mounted paths; a person at a terminal overrides none.
+# stdin to stdout with the built-in fallback. The wrapper overrides all three
+# with mounted paths; a person at a terminal overrides none.
 ENTRYPOINT ["bun", "run", "/app/main.js"]
-CMD ["-", "-", "/app/theme"]
+CMD ["-", "-", "/app/payload"]

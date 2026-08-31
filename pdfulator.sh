@@ -1170,17 +1170,22 @@ fi
 STYLER=$(engine_get "$ENGINE" styler)
 
 # Where the fonts will be when the engine runs, which is not where they are
-# now: a container sees the staged directory at its mount point. Only the
-# wrapper knows both, which is why the path is passed in rather than assumed.
+# now: a container sees the payload at its mount point. Only the wrapper knows
+# both, which is why the path is passed in rather than assumed.
+#
+# `/payload` here must match the mount point lib/container.sh uses and the
+# CMD default in each image's Dockerfile. Three places, one value -- a
+# @font-face src pointing at the old path is a silently unstyled PDF, not an
+# error, so tests/fontmatrix.sh asserts this prefix.
 if engine_needs_docker "$ENGINE"; then
-	FONT_BASE=/theme/fonts
+	FONT_BASE=/payload/fonts
 else
 	FONT_BASE=fonts
 fi
 
-THEME_DIR=$(stage_dir "$THEME_SRC" "$ENGINE" "$STYLER" "$FONT_BASE" "$css") \
+PAYLOAD_DIR=$(stage_dir "$THEME_SRC" "$ENGINE" "$STYLER" "$FONT_BASE" "$css") \
 	|| exit 1
-if [ "$verbose" = 1 ]; then echo "Staged: $THEME_DIR" >&2; fi
+if [ "$verbose" = 1 ]; then echo "Payload: $PAYLOAD_DIR" >&2; fi
 
 # Only what this engine actually declares. A pandoc-xslt user never meets bun,
 # and never pays for a browser search -- which is the point of putting the
@@ -1282,7 +1287,7 @@ run_jobs() {
 	while IFS='	' read -r _rj_in _rj_out; do
 		[ -n "$_rj_in" ] || continue
 		if [ "$verbose" = 1 ]; then echo "Converting $_rj_in" >&2; fi
-		engine_convert "$ENGINE" "$_rj_in" "$_rj_out" "$THEME_DIR" || _rj_status=1
+		engine_convert "$ENGINE" "$_rj_in" "$_rj_out" "$PAYLOAD_DIR" || _rj_status=1
 	done <<-EOF
 	$_rj_list
 	EOF
@@ -1311,7 +1316,7 @@ if [ "$_in" = "-" ]; then
 	# Nothing but "-" (and optionally an output) can follow: there is one
 	# document on stdin, so a second argument naming another input is a
 	# mistake worth reporting rather than silently dropping.
-	engine_convert "$ENGINE" - "${_out:--}" "$THEME_DIR"
+	engine_convert "$ENGINE" - "${_out:--}" "$PAYLOAD_DIR"
 	exit $?
 fi
 
@@ -1327,7 +1332,7 @@ if [ "$_out" = "-" ]; then
 		echo "pdfulator: no such file: $_in" >&2
 		exit 1
 	fi
-	engine_convert "$ENGINE" "$_in" - "$THEME_DIR"
+	engine_convert "$ENGINE" "$_in" - "$PAYLOAD_DIR"
 	exit $?
 fi
 

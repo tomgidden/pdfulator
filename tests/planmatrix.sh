@@ -22,7 +22,7 @@ ENGINE=$REPO/engines/null/convert
 # comparisons against resolved paths fail for no interesting reason.
 BASE=$(printf '%s' "${TMPDIR:-/tmp}" | sed 's|/*$||')/pdfulator-planmatrix
 FAIL=0
-THEME=/test/theme
+PAYLOAD=/test/payload
 
 fixture() {
 	rm -rf "$BASE"; mkdir -p "$BASE"; cd "$BASE" || exit 1
@@ -64,7 +64,7 @@ run() {
 	if [ "$status" -eq 0 ]; then
 		jobs_each | while IFS='	' read -r i o; do
 			[ -n "$i" ] || continue
-			"$ENGINE" "$i" "$o" "$THEME" || echo "ENGINE-FAILED $i" >&2
+			"$ENGINE" "$i" "$o" "$PAYLOAD" || echo "ENGINE-FAILED $i" >&2
 		done
 		# List only PDFs this run actually produced -- identified by the
 		# engine's own stamp, so pre-existing fixture PDFs (real.pdf, liar.pdf,
@@ -193,22 +193,22 @@ field() { sed -n "s/^%%pdfulator-$2: //p" "$1" | head -1; }
 
 fixture
 jobs_plan a.md out.pdf
-jobs_each | while IFS='	' read -r i o; do "$ENGINE" "$i" "$o" "$THEME"; done
+jobs_each | while IFS='	' read -r i o; do "$ENGINE" "$i" "$o" "$PAYLOAD"; done
 check "output is a real PDF"        "%PDF"       "$(dd if=out.pdf bs=1 count=4 2>/dev/null)"
 check "engine saw the right source" "Doc a"      "$(field out.pdf title)"
-check "engine got the theme"        "$THEME"     "$(field out.pdf theme)"
+check "engine got the payload"      "$PAYLOAD"     "$(field out.pdf payload)"
 check "engine wrote where told"     "$BASE/out.pdf" "$(field out.pdf output)"
 
 # Each file in a directory batch must get its own content, not the first one's.
 fixture
 jobs_plan src outdir
-jobs_each | while IFS='	' read -r i o; do "$ENGINE" "$i" "$o" "$THEME"; done
+jobs_each | while IFS='	' read -r i o; do "$ENGINE" "$i" "$o" "$PAYLOAD"; done
 check "batch keeps documents apart (x)" "x" "$(field outdir/x.pdf title)"
 check "batch keeps documents apart (y)" "y" "$(field outdir/y.pdf title)"
 
 # An engine that fails must not leave a plausible-looking PDF behind.
 fixture
-"$ENGINE" nope.md ghost.pdf "$THEME" 2>/dev/null
+"$ENGINE" nope.md ghost.pdf "$PAYLOAD" 2>/dev/null
 check "no output when the engine fails" "absent" \
       "$([ -e ghost.pdf ] && echo present || echo absent)"
 

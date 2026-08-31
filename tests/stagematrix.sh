@@ -298,6 +298,34 @@ out=$(stage_dir "$BASE/themes/loop" vivlio vivliostyle 2>/dev/null); st=$?
 ok "an inheritance loop fails" "1" "$st"
 
 
+echo "============ PAYLOAD FORMAT ============"
+# STAGE_FORMAT is in the key so that a change in the SHAPE of a payload
+# invalidates every cached one.
+#
+# Nothing about a user's themes changes when the wrapper starts generating
+# something differently, so every other input to the key is identical across
+# such an upgrade and the cache goes on serving the old layout. That is not
+# hypothetical: renaming the container mount from /theme to /payload changed
+# the embed-url in every generated fop-fonts.xconf, and a payload cached from
+# before the rename made FOP fail to load a single font -- a stack trace
+# mentioning neither caching nor the upgrade that caused it.
+fixture
+_chain=$(theme_chain "$BASE/themes/derived")
+_k_before=$(stage_key "$_chain" vivlio vivliostyle)
+
+_saved=$STAGE_FORMAT
+STAGE_FORMAT=$((STAGE_FORMAT + 1))
+_k_after=$(stage_key "$_chain" vivlio vivliostyle)
+STAGE_FORMAT=$_saved
+
+ok "bumping the payload format changes the key" "no" \
+   "$([ "$_k_before" = "$_k_after" ] && echo yes || echo no)"
+
+# And the same format gives the same key, or every run would restage.
+ok "the same format gives the same key" "yes" \
+   "$([ "$_k_before" = "$(stage_key "$_chain" vivlio vivliostyle)" ] && echo yes || echo no)"
+
+
 printf '\n'
 if [ "$FAIL" = 0 ]; then
 	echo "ALL EXPECTATIONS MET"

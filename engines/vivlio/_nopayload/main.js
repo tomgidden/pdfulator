@@ -1,16 +1,16 @@
 #!/usr/bin/env bun
 // engines/vivlio/main.js — the vivlio engine's converter.
 //
-//   main.js <input|-> <output|-> <theme-dir>
+//   main.js <input|-> <output|-> <payload-dir>
 //
 // One document in, one document out. Everything else -- which files to
-// convert, where the output goes, whether it may be overwritten, which theme
+// convert, where the output goes, whether it may be overwritten, which payload
 // that directory name came from, which browser to drive -- was decided by the
 // wrapper before this ran, and arrives as three arguments and $CHROME_PATH.
 //
 // This is what remains of the v2 pdfulator.js after the common layer took the
 // rest. The pipeline is unchanged, and deliberately so: markdown-it for the
-// markdown, Mustache over the theme's article.tmpl for the page, then the
+// markdown, Mustache over the payload's markup template for the page, then the
 // Vivliostyle viewer served over a local mux server and printed by Chromium
 // through puppeteer-core's page.pdf().
 //
@@ -172,7 +172,7 @@ function formatDate(d) {
 // so adding one meant editing all of them and hoping none was missed.
 //
 // WHY THE HREFS ARE ABSOLUTE. The generated HTML lives in a temp directory
-// served at /doc/, while the payload is served at /theme/ -- the document and
+// served at /doc/, while the payload is served at /payload/ -- the document and
 // the payload are not in one tree, so a relative href cannot reach across.
 // The engine generates them, so no author ever writes the prefix. Note this
 // does NOT apply to url() inside a stylesheet: CSS resolves those against the
@@ -197,7 +197,7 @@ function escapeAttr(s) {
 // path the user typed -- a path on the host filesystem, which the document is
 // served over HTTP and a container cannot see at all.
 function linkTags(payload) {
-  const href = p => '/theme/' + path.relative(payload, p).split(path.sep).join('/');
+  const href = p => '/payload/' + path.relative(payload, p).split(path.sep).join('/');
   const link = h => `  <link rel="stylesheet" href="${escapeAttr(h)}">`;
 
   const out = [];
@@ -205,7 +205,7 @@ function linkTags(payload) {
   // Fonts first and unconditionally: it is generated at the payload root, it
   // declares @font-face and the --pdfulator-<role> properties, and every sheet
   // below may refer to them.
-  if (fs.existsSync(path.join(payload, 'fonts.css'))) out.push(link('/theme/fonts.css'));
+  if (fs.existsSync(path.join(payload, 'fonts.css'))) out.push(link('/payload/fonts.css'));
 
   // Which engine and styler, read from the payload rather than passed in: the
   // contract is three paths, and `vivlio` and `vivlio-docker` run this same
@@ -221,14 +221,14 @@ function linkTags(payload) {
   const declared = sheets.filter(s => !isExternal(s));
 
   for (const sheet of declared) out.push(link(href(sheet)));
-  if (fs.existsSync(path.join(payload, 'logo.css'))) out.push(link('/theme/logo.css'));
+  if (fs.existsSync(path.join(payload, 'logo.css'))) out.push(link('/payload/logo.css'));
   for (const sheet of external) out.push(link(href(sheet)));
 
   return out.join('\n');
 }
 
 
-function buildHtml(mdSource, inputBase, themeDir, extraCss) {
+function buildHtml(mdSource, inputBase, payloadDir, extraCss) {
   const sidecar = loadSidecar(inputBase);
   const { meta: docMeta, body: rawBody } = parseFrontMatter(mdSource);
 
@@ -247,8 +247,11 @@ function buildHtml(mdSource, inputBase, themeDir, extraCss) {
 
   const meta = normaliseMeta(merged);
 
-  // Theme config can set default pdfulator_features
-  const themeConfigPath = path.join(themeDir, 'theme.yaml');
+  // A theme's own defaults for pdfulator_features. Looked up by NAME, which is
+  // the last such lookup in this file -- theme.yaml is still in stage.sh's
+  // STAGE_FILES, no shipped theme has one, and nothing declares it in a conf.
+  // PAYLOAD-PLAN commit 4 territory: it should be a theme.conf key.
+  const themeConfigPath = path.join(payloadDir, 'theme.yaml');
   if (!meta.pdfulator_features && fs.existsSync(themeConfigPath)) {
     try {
       const tc = yaml.load(fs.readFileSync(themeConfigPath, 'utf8')) || {};
@@ -275,7 +278,7 @@ function buildHtml(mdSource, inputBase, themeDir, extraCss) {
   // minimum that produces a readable page, not a copy of the real template: an
   // engine carrying a second opinion about how a document should look is how
   // defaults/ and the pandoc engine drifted apart.
-  const tmplPath = markup(themeDir);
+  const tmplPath = markup(payloadDir);
   const tmpl = tmplPath
     ? fs.readFileSync(tmplPath, 'utf8')
     : FALLBACK_TMPL;
@@ -291,7 +294,7 @@ function buildHtml(mdSource, inputBase, themeDir, extraCss) {
     authors: normaliseAuthors(meta.authors || meta.author),
     date: formatDate(meta.date),
     css: extraCss || meta.css || '',
-    stylesheets: linkTags(themeDir),
+    stylesheets: linkTags(payloadDir),
     pdfulator_features: meta.pdfulator_features || '',
   };
 
@@ -327,7 +330,7 @@ function serveDir(dir, port) {
   });
 }
 
-async function htmlToPdf(htmlPath, pdfPath, chromiumPath, themeDir, verbose) {
+async function htmlToPdf(htmlPath, pdfPath, chromiumPath, payloadDir, verbose) {
   // Serve from the tmp dir containing the HTML (so relative CSS/font paths work)
   const serveRoot = path.dirname(htmlPath);
   const htmlFilename = path.basename(htmlPath);
@@ -341,7 +344,7 @@ async function htmlToPdf(htmlPath, pdfPath, chromiumPath, themeDir, verbose) {
 
   const docServer = await serveDir(serveRoot, port);
 
-  // Also serve defaults and theme from the same origin via symlinks would be messy;
+  // Also serve defaults and payload from the same origin via symlinks would be messy;
   // instead serve from filesystem root so absolute paths work.
   // Vivliostyle viewer needs to be reachable too — serve it at /vivliostyle/
   // We use a single server that muxes by path prefix.
@@ -355,8 +358,8 @@ async function htmlToPdf(htmlPath, pdfPath, chromiumPath, themeDir, verbose) {
       filePath = path.join(VIEWER_DIR, url.slice('/vivliostyle/'.length));
     } else if (url.startsWith('/doc/')) {
       filePath = path.join(serveRoot, url.slice('/doc/'.length));
-    } else if (url.startsWith('/theme/')) {
-      filePath = path.join(themeDir, url.slice('/theme/'.length));
+    } else if (url.startsWith('/payload/')) {
+      filePath = path.join(payloadDir, url.slice('/payload/'.length));
     } else {
       res.writeHead(404); res.end(''); return;
     }
@@ -479,7 +482,7 @@ async function readInput(input) {
 // the input's own path minus its extension -- and for stdin there is no such
 // path, hence no sidecar. That is not a gap: a sidecar is a file named after
 // another file, and a stream has no name.
-async function convert(input, output, themeDir, opts) {
+async function convert(input, output, payloadDir, opts) {
   const mdSource = await readInput(input);
 
   // Empty stdin is an error; an empty *file* is not.
@@ -506,13 +509,13 @@ async function convert(input, output, themeDir, opts) {
     : input.replace(/\.[^.]+$/, '');
 
   try {
-    fs.writeFileSync(htmlPath, buildHtml(mdSource, inputBase, themeDir, null));
+    fs.writeFileSync(htmlPath, buildHtml(mdSource, inputBase, payloadDir, null));
 
     // Render to a temporary PDF and move it into place, so an interrupted run
     // cannot leave a half-written file that still looks like a PDF. stdout
     // gets the bytes instead, there being nothing to move.
     const tmpPdf = path.join(tmpDir, `${leaf}.pdf`);
-    await htmlToPdf(htmlPath, tmpPdf, process.env.CHROME_PATH, themeDir, opts.verbose);
+    await htmlToPdf(htmlPath, tmpPdf, process.env.CHROME_PATH, payloadDir, opts.verbose);
 
     if (output === '-') {
       process.stdout.write(fs.readFileSync(tmpPdf));
@@ -556,10 +559,10 @@ async function main() {
   // Positional and fixed. The wrapper is the only caller, and it always passes
   // all three, so anything else is a bug in the wrapper rather than a user
   // mistake -- and is reported as such, since the user cannot act on it.
-  const [input, output, themeDir] = argv;
+  const [input, output, payloadDir] = argv;
 
   if (argv.length !== 3) {
-    console.error('vivlio: usage: main.js <input|-> <output|-> <theme-dir>');
+    console.error('vivlio: usage: main.js <input|-> <output|-> <payload-dir>');
     console.error('(this is the engine contract; run pdfulator instead)');
     process.exit(2);
   }
@@ -573,12 +576,12 @@ async function main() {
     process.exit(1);
   }
 
-  if (!fs.existsSync(themeDir)) {
-    console.error(`vivlio: theme directory not found: ${themeDir}`);
+  if (!fs.existsSync(payloadDir)) {
+    console.error(`vivlio: payload directory not found: ${payloadDir}`);
     process.exit(1);
   }
 
-  await convert(input, output, themeDir, opts);
+  await convert(input, output, payloadDir, opts);
 }
 
 main().catch(err => {

@@ -456,7 +456,7 @@ that you have to set `content`, even though the main stylesheet already does:
 @page {
   @top-right {
     content: string("");                    /* seemingly important */
-    background-image: url(/theme/logo.svg);
+    background-image: url(/payload/logo.svg);
     background-size: 108pt auto;            /* here's how to size the image */
     /* control `height`, `margin-top` and `margin-right` appropriately, but check
      * it doesn't crash into content on page 2 onwards.

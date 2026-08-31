@@ -18,11 +18,11 @@
 # a mount that merely contains that text.
 # Both container engines, because the translation is shared (lib/container.sh)
 # and a bug in it would otherwise be found in whichever engine happened to be
-# tested. Each engine supplies only its name and its built-in theme path, so
+# tested. Each engine supplies only its name and its built-in payload path, so
 # those are what the cases parameterise over.
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 # Discovered, not listed: every engine declaring needs_docker=yes is tested,
-# so adding one cannot quietly skip these cases. The built-in theme path is
+# so adding one cannot quietly skip these cases. The built-in payload path is
 # read from the engine's own convert, which is where it is declared -- it is
 # not in engine.conf, being an implementation detail of the image rather than
 # something a user configures.
@@ -30,8 +30,8 @@ ENGINES=$(for _c in "$REPO"/engines/*/engine.conf; do
 	[ -f "$_c" ] || continue
 	grep -q '^needs_docker=yes' "$_c" || continue
 	_id=$(basename -- "$(dirname -- "$_c")")
-	_th=$(sed -n 's/^CONTAINER_THEME=//p' "$(dirname -- "$_c")/convert" | head -1)
-	[ -n "$_th" ] || _th=/theme
+	_th=$(sed -n 's/^CONTAINER_PAYLOAD=//p' "$(dirname -- "$_c")/convert" | head -1)
+	[ -n "$_th" ] || _th=/payload
 	printf '%s:%s ' "$_id" "$_th"
 done)
 
@@ -50,10 +50,10 @@ check() {  # check <description> <expected> <actual>
 
 fixture() {
 	rm -rf "$BASE"
-	mkdir -p "$BASE/bin" "$BASE/src" "$BASE/out" "$BASE/dist/theme" \
+	mkdir -p "$BASE/bin" "$BASE/src" "$BASE/out" "$BASE/dist/payload" \
 	         "$BASE/my themes/plain"
 	printf '# One\n' > "$BASE/src/a.md"
-	printf 'body{}\n' > "$BASE/dist/theme/style.css"
+	printf 'body{}\n' > "$BASE/dist/payload/style.css"
 	printf 'body{}\n' > "$BASE/my themes/plain/style.css"
 
 	cat > "$BASE/bin/docker" <<'FAKE'
@@ -69,7 +69,7 @@ FAKE
 }
 
 # Run the engine and keep what the fake docker was handed.
-run() {  # run <in> <out> <theme>
+run() {  # run <in> <out> <payload>
 	( cd "$BASE" && "$ENGINE_DIR/convert" "$1" "$2" "$3" 2>"$BASE/err" )
 }
 
@@ -102,11 +102,11 @@ for _spec in $ENGINES; do
 
 	echo "============ CONTRACT ============"
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	# The three contract arguments are rewritten to container paths, in order, and
 	# nothing else follows them -- an engine that appended its own flag after the
-	# theme would break every image's argument parsing.
-	check "contract args are container paths" "/in/a.md /out/a.pdf /theme" \
+	# payload would break every image's argument parsing.
+	check "contract args are container paths" "/in/a.md /out/a.pdf /payload" \
 	      "$(contract "$OUT")"
 	check "the image is named" "yes" "$(has "$OUT" "$IMAGE")"
 	check "the run is disposable" "yes" "$(has "$OUT" "--rm")"
@@ -117,7 +117,7 @@ for _spec in $ENGINES; do
 
 	echo "============ INPUT ============"
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	# The document's *directory*, not the document: relative image references
 	# resolve against the document, and a single-file bind mount pins an inode
 	# that an editor's write-and-rename replaces.
@@ -137,13 +137,13 @@ for _spec in $ENGINES; do
 	check "stdin stays stdin in the container" "- - $BUILTIN" "$(contract "$OUT")"
 
 	fixture
-	run "$BASE/src/nope.md" "$BASE/out/a.pdf" "$BASE/dist/theme" >/dev/null 2>&1
+	run "$BASE/src/nope.md" "$BASE/out/a.pdf" "$BASE/dist/payload" >/dev/null 2>&1
 	check "a missing input fails before docker runs" "1" "$?"
 
 
 	echo "============ OUTPUT ============"
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	check "the output directory is mounted writable" "yes" \
 	      "$(has "$OUT" "$BASE/out:/out")"
 	check "the output directory is not read-only" "no" \
@@ -153,13 +153,13 @@ for _spec in $ENGINES; do
 	# thing for a conversion to leave behind. The engine creates it first, as the
 	# user.
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/fresh/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/fresh/a.pdf" "$BASE/dist/payload")
 	check "a missing output directory is created" "yes" \
 	      "$([ -d "$BASE/out/fresh" ] && echo yes || echo no)"
 	check "and mounted" "yes" "$(has "$OUT" "$BASE/out/fresh:/out")"
 
 	fixture
-	OUT=$(run "$BASE/src/a.md" - "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" - "$BASE/dist/payload")
 	check "stdout needs no output mount" "no" "$(has "$OUT" "$BASE/out:/out")"
 
 	# `pdfulator dir/` writes each PDF beside its source, so this is the common
@@ -167,63 +167,64 @@ for _spec in $ENGINES; do
 	# mounts must be present -- a container given only the read-only /in has
 	# nowhere to put the PDF.
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/src/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/src/a.pdf" "$BASE/dist/payload")
 	check "same dir in and out: read-only in" "yes" \
 	      "$(has "$OUT" "$BASE/src:/in:ro")"
 	check "same dir in and out: writable out" "yes" \
 	      "$(has "$OUT" "$BASE/src:/out")"
-	check "and the contract names both" "/in/a.md /out/a.pdf /theme" \
+	check "and the contract names both" "/in/a.md /out/a.pdf /payload" \
 	      "$(contract "$OUT")"
 
 
-	echo "============ THEME ============"
-	# Every theme given is mounted, including one that happens to live inside
+	echo "============ PAYLOAD ============"
+	# Every payload given is mounted, including one that happens to live inside
 	# the install directory.
 	#
-	# There used to be a special case here: a theme equal to $PDFULATOR_DIR/theme
-	# was *not* mounted, since the image already carried an identical copy. That
-	# stopped being true when the wrapper began staging themes -- what arrives
-	# now is a directory built per engine under $PDFULATOR_HOME/cache, holding
-	# the concatenated CSS, the fetched fonts and the generated configuration.
-	# Skipping the mount would hand the container the theme baked in at build
-	# time and silently ignore the user's, which is a wrong PDF rather than an
-	# error. The image's own copy is only the fallback when no theme is given.
+	# There used to be a special case here: a directory equal to
+	# $PDFULATOR_DIR/theme was *not* mounted, since the image already carried an
+	# identical copy. That stopped being true when the wrapper began staging --
+	# what arrives now is a payload built per engine under $PDFULATOR_HOME/cache,
+	# holding the concatenated CSS, the fetched fonts and the generated
+	# configuration. Skipping the mount would hand the container what was baked
+	# in at build time and silently ignore the user's, which is a wrong PDF
+	# rather than an error. The image's own copy is only the fallback when no
+	# payload is given.
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
-	check "a theme inside the install dir is still mounted" "yes" \
-	      "$(has "$OUT" "$BASE/dist/theme:/theme:ro")"
-	check "and becomes /theme" "/theme" \
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
+	check "a payload inside the install dir is still mounted" "yes" \
+	      "$(has "$OUT" "$BASE/dist/payload:/payload:ro")"
+	check "and becomes /payload" "/payload" \
 	      "$(printf '%s\n' "$OUT" | tail -1)"
 
-	# No theme at all: nothing to mount, so the image's own copy is used.
+	# No payload at all: nothing to mount, so the image's own copy is used.
 	fixture
 	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "")
 	check "no theme falls back to the image's copy" "$BUILTIN" \
 	      "$(printf '%s\n' "$OUT" | tail -1)"
-	check "and mounts nothing at /theme" "no" \
-	      "$(has "$OUT" ":/theme:ro")"
+	check "and mounts nothing at /payload" "no" \
+	      "$(has "$OUT" ":/payload:ro")"
 
 	fixture
 	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/my themes/plain")
-	check "a user theme is mounted read-only" "yes" \
-	      "$(has "$OUT" "$BASE/my themes/plain:/theme:ro")"
-	check "a user theme becomes /theme" "/theme" \
+	check "a user payload is mounted read-only" "yes" \
+	      "$(has "$OUT" "$BASE/my themes/plain:/payload:ro")"
+	check "a user payload becomes /payload" "/payload" \
 	      "$(printf '%s\n' "$OUT" | tail -1)"
 
 	# A theme path containing a space is one argument, not two. It arrives here
 	# already resolved by the wrapper, so this is about not breaking it: a mount
 	# built by string concatenation and then word-split would send docker "-v",
-	# "/base/my", "themes/plain:/theme:ro" and fail with a message naming a path
+	# "/base/my", "themes/plain:/payload:ro" and fail with a message naming a path
 	# the user never typed.
-	check "a space in the theme path survives" "1" \
-	      "$(printf '%s\n' "$OUT" | grep -c "^$BASE/my themes/plain:/theme:ro$")"
+	check "a space in the payload path survives" "1" \
+	      "$(printf '%s\n' "$OUT" | grep -c "^$BASE/my themes/plain:/payload:ro$")"
 
 
 	echo "============ OWNERSHIP ============"
 	# On Linux the image's own user writes the PDF, and its uid is not the
 	# caller's, so the file lands unwritable by the person who asked for it.
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	if [ "$(id -u)" = 0 ]; then
 		check "root is left alone" "no" "$(has "$OUT" "--user")"
 	else
@@ -243,12 +244,12 @@ for _spec in $ENGINES; do
 
 	echo "============ ENVIRONMENT ============"
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	check "quiet by default" "no" "$(has "$OUT" "PDFULATOR_VERBOSE=1")"
 
 	fixture
 	PDFULATOR_VERBOSE=1 && export PDFULATOR_VERBOSE
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	check "verbosity travels into the container" "yes" \
 	      "$(has "$OUT" "-e")"
 	check "as PDFULATOR_VERBOSE" "yes" "$(has "$OUT" "PDFULATOR_VERBOSE=1")"
@@ -259,13 +260,13 @@ for _spec in $ENGINES; do
 	# Read from engine.conf rather than hardcoded, so the tag the engine declares
 	# and the tag it runs cannot disagree.
 	fixture
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	check "the configured image is used" "yes" \
 	      "$(has "$OUT" "$IMAGE")"
 
 	fixture
 	PDFULATOR_IMAGE=example/local:test && export PDFULATOR_IMAGE
-	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme")
+	OUT=$(run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload")
 	check "an override is honoured" "yes" "$(has "$OUT" "example/local:test")"
 	check "and replaces the default" "no" "$(has "$OUT" "$IMAGE")"
 	unset PDFULATOR_IMAGE
@@ -277,7 +278,7 @@ for _spec in $ENGINES; do
 	# a shell.
 	fixture
 	PDFULATOR_DOCKER="$BASE/bin/nosuchdocker" && export PDFULATOR_DOCKER
-	run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/theme" >/dev/null 2>&1
+	run "$BASE/src/a.md" "$BASE/out/a.pdf" "$BASE/dist/payload" >/dev/null 2>&1
 	check "absent docker is an error" "1" "$?"
 	check "and says which engine to use instead" "yes" \
 	      "$(grep -q 'engine vivlio' "$BASE/err" && echo yes || echo no)"
@@ -361,7 +362,7 @@ FAKE
 	# Three bugs in lib/browser.sh were invisible until the tests ran under it.
 	fixture
 	sh -c "set -e; PDFULATOR_DOCKER='$BASE/bin/docker' PDFULATOR_DIR='$BASE/dist' \
-	       '$ENGINE_DIR/convert' '$BASE/src/a.md' '$BASE/out/a.pdf' '$BASE/dist/theme'" \
+	       '$ENGINE_DIR/convert' '$BASE/src/a.md' '$BASE/out/a.pdf' '$BASE/dist/payload'" \
 		>/dev/null 2>&1
 	check "convert survives set -e" "0" "$?"
 done
