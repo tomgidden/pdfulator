@@ -43,7 +43,7 @@ fixture() {
 	mkdir -p "$BASE/engine" "$BASE/theme" "$BASE/work" \
 	         "$BASE/bin" "$BASE/in" "$BASE/out"
 
-	printf 'template\n'  > "$BASE/engine/article.tmpl"
+	printf 'template\n'  > "$BASE/engine/template.html.pandoc"
 	printf '%s\n' '-- filter' > "$BASE/engine/metadata.lua"
 	# The theme arrives staged: the wrapper has already concatenated the CSS
 	# cascade and generated the @font-face rules, so the engine sees two plain
@@ -122,7 +122,7 @@ check "output is html5" "yes" "$(haslog "$PANDOC_LOG" "html5")"
 # fight it with hardcoded colours.
 check "highlighting is off" "yes" "$(haslog "$PANDOC_LOG" "--no-highlight")"
 check "the engine's template is used" "yes" \
-      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/template.html.pandoc")"
 check "the engine's filter is used" "yes" \
       "$(haslog "$PANDOC_LOG" "--lua-filter=$BASE/engine/metadata.lua")"
 
@@ -187,7 +187,7 @@ echo "============ THEME OVERRIDES ============"
 fixture
 mkdir -p "$BASE/theme/_lib" "$BASE/theme/input/templates/pandoc"
 printf 'staged template\n' > "$BASE/theme/input/templates/pandoc/tmpl.html"
-printf 'template.structure = ./tmpl.html\n' \
+printf 'markup = ./tmpl.html\n' \
 	> "$BASE/theme/input/templates/pandoc/template.conf"
 cp "$REPO/lib/payload/payload.sh" "$REPO/lib/conf.sh" "$BASE/theme/_lib/"
 chmod +x "$BASE/theme/_lib/payload.sh"
@@ -195,7 +195,7 @@ run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
 check "the declared template wins" "yes" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/input/templates/pandoc/tmpl.html")"
 check "and the engine's is not also passed" "no" \
-      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/template.html.pandoc")"
 
 # The point of the change, stated directly: a file with the old magic name, not
 # declared by any template.conf, is now just a file.
@@ -208,14 +208,14 @@ run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
 check "an undeclared article.tmpl no longer wins" "no" \
       "$(haslog "$PANDOC_LOG" "--template=$BASE/theme/article.tmpl")"
 check "the engine's own is used instead" "yes" \
-      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/template.html.pandoc")"
 
 # A staged directory with no template at all falls back to the engine's own,
 # which is what a bare `docker run` with no mounts gets.
 fixture
 run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/theme"
 check "no staged template falls back to the engine's" "yes" \
-      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/article.tmpl")"
+      "$(haslog "$PANDOC_LOG" "--template=$BASE/engine/template.html.pandoc")"
 
 fixture
 printf '%s\n' '-- theme filter' > "$BASE/theme/metadata.lua"

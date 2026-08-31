@@ -46,9 +46,9 @@ setup() {
 
 	echo 'MUSTACHE' > "$BASE/templates/mustache/article.tmpl"
 	echo 'PANDOC'   > "$BASE/templates/pandoc/article.tmpl"
-	printf 'template.structure = ./article.tmpl\n' \
+	printf 'markup = ./article.tmpl\n' \
 		> "$BASE/templates/mustache/template.conf"
-	printf 'template.structure = ./article.tmpl\n' \
+	printf 'markup = ./article.tmpl\n' \
 		> "$BASE/templates/pandoc/template.conf"
 
 	printf 'styler=vivliostyle\ntemplate=mustache\n' \
@@ -90,7 +90,7 @@ ok "the + is left on the value" "yes" \
 	"$(conf_get_all "$BASE/multi.conf" a | sed -n 2p | \
 	   grep -q '^+' && echo yes || echo no)"
 
-# A key set to nothing contributes nothing: `template.styling =` means "no
+# A key set to nothing contributes nothing: `stylesheet =` means "no
 # styling", not "add the empty filename", which would resolve to the config
 # file's own directory and be read as a stylesheet.
 printf 'a = one\na =\na = +two\n' > "$BASE/empty.conf"
@@ -197,26 +197,26 @@ ok "an absolute path is taken as given" "$BASE/templates/pandoc" \
 ok "a missing template fails" "1" \
 	"$(template_resolve nosuch "$BASE/engines/viv" >/dev/null 2>&1; echo $?)"
 
-ok "the structure is resolved to an absolute path" \
+ok "the markup is resolved to an absolute path" \
 	"$BASE/templates/mustache/article.tmpl" \
-	"$(template_structure "$BASE/templates/mustache")"
+	"$(template_markup "$BASE/templates/mustache")"
 ok "and staged under its own basename" "article.tmpl" \
-	"$(template_structure_name "$BASE/templates/mustache")"
+	"$(template_markup_name "$BASE/templates/mustache")"
 
-# A structure the template names but does not have is an error for the same
+# A markup file the template names but does not have is an error for the same
 # reason: it would otherwise stage nothing and fall back to a built-in that
 # looks almost right.
-printf 'template.structure = ./missing.tmpl\n' \
+printf 'markup = ./missing.tmpl\n' \
 	> "$BASE/templates/mustache/template.conf"
-ok "a named structure that is absent fails" "1" \
-	"$(template_structure "$BASE/templates/mustache" >/dev/null 2>&1; echo $?)"
+ok "a named markup file that is absent fails" "1" \
+	"$(template_markup "$BASE/templates/mustache" >/dev/null 2>&1; echo $?)"
 
-# A template may carry styling alone and declare no structure at all.
+# A template may carry styling alone and declare no markup at all.
 printf '# nothing\n' > "$BASE/templates/mustache/template.conf"
-ok "a template with no structure is not an error" "0" \
-	"$(template_structure "$BASE/templates/mustache" >/dev/null 2>&1; echo $?)"
+ok "a template with no markup is not an error" "0" \
+	"$(template_markup "$BASE/templates/mustache" >/dev/null 2>&1; echo $?)"
 ok "and stages nothing" "" \
-	"$(template_structure "$BASE/templates/mustache")"
+	"$(template_markup "$BASE/templates/mustache")"
 
 
 section "SUPPORT FILES"
@@ -229,7 +229,7 @@ setup
 printf 'x\n' > "$BASE/templates/mustache/one.ent"
 printf 'y\n' > "$BASE/templates/mustache/two.ent"
 {
-	printf 'template.structure = ./article.tmpl\n'
+	printf 'markup = ./article.tmpl\n'
 	printf 'template.support = ./one.ent\n'
 	printf 'template.support = ./two.ent\n'
 } > "$BASE/templates/mustache/template.conf"
@@ -244,13 +244,13 @@ ok "support paths are absolute" "yes" \
 
 # Absent is an error, not a silent omission -- the failure it prevents happens
 # later, inside the engine, and names the entity rather than the template.
-printf 'template.structure = ./article.tmpl\ntemplate.support = ./nosuch.ent\n' \
+printf 'markup = ./article.tmpl\ntemplate.support = ./nosuch.ent\n' \
 	> "$BASE/templates/mustache/template.conf"
 ok "a missing support file fails" "1" \
 	"$(template_support "$BASE/templates/mustache" >/dev/null 2>&1; echo $?)"
 
 # Declaring none is the ordinary case.
-printf 'template.structure = ./article.tmpl\n' \
+printf 'markup = ./article.tmpl\n' \
 	> "$BASE/templates/mustache/template.conf"
 ok "no support files is not an error" "0" \
 	"$(template_support "$BASE/templates/mustache" >/dev/null 2>&1; echo $?)"
@@ -266,7 +266,7 @@ ok "docbook5-pandoc declares global.ent" "yes" \
 section "THE SHIPPED TREE"
 
 # The real engines, not fixtures. Every engine that declares a template must
-# resolve to one that exists and has the structure it claims -- otherwise the
+# resolve to one that exists and has the markup it claims -- otherwise the
 # staged directory silently lacks a template and the engine falls back to a
 # built-in, which is the failure this whole object type exists to prevent.
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -282,17 +282,17 @@ for e in vivlio vivlio-docker pandoc-pagedjs pandoc-xslt; do
 	t=$(template_select "$rchain" "$e" "$s" "$REPO/engines/$e") || t=""
 	ok "$e selects a template" "yes" \
 		"$([ -n "$t" ] && echo yes || echo no)"
-	f=$(template_structure "$t" 2>/dev/null) || f=""
-	ok "$e's structure exists" "yes" \
+	f=$(template_markup "$t" 2>/dev/null) || f=""
+	ok "$e's markup exists" "yes" \
 		"$([ -n "$f" ] && [ -f "$f" ] && echo yes || echo no)"
 done
 
 # The syntax check that names the bug. The vivlio engines must get Mustache
 # placeholders and the pandoc ones must not -- asserted on the real files,
 # because this is the pairing that was wrong in every shipped release.
-vt=$(template_structure "$(template_select "$rchain" vivlio vivliostyle \
+vt=$(template_markup "$(template_select "$rchain" vivlio vivliostyle \
 	"$REPO/engines/vivlio")")
-pt=$(template_structure "$(template_select "$rchain" pandoc-pagedjs pagedjs \
+pt=$(template_markup "$(template_select "$rchain" pandoc-pagedjs pagedjs \
 	"$REPO/engines/pandoc-pagedjs")")
 ok "vivlio's template is Mustache" "yes" \
 	"$(grep -q '{{' "$vt" && echo yes || echo no)"
@@ -303,11 +303,16 @@ ok "pandoc-pagedjs's template is pandoc syntax" "yes" \
 ok "and the two are different files" "no" \
 	"$([ "$vt" = "$pt" ] && echo yes || echo no)"
 
-# The theme tree must no longer carry a structural template of its own. This is
-# the regression guard: putting article.tmpl back into themes/default is
-# exactly what reintroduces the bug, and it would look like a tidy-up.
-ok "no theme ships a structural template" "0" \
-	"$(find "$REPO/themes" -name '*.tmpl' | wc -l | tr -d ' ')"
+# The theme tree must no longer carry a markup template of its own. This is
+# the regression guard: putting a template back into themes/default is exactly
+# what reintroduces the bug, and it would look like a tidy-up.
+#
+# Matched by PREFIX, not by the `.tmpl` extension the shipped templates used to
+# have. Since the rename they are `template.html.mustache` and friends, so an
+# extension test would pass whatever a theme dropped in -- the guard would
+# still be here, still green, and guarding nothing.
+ok "no theme ships a markup template" "0" \
+	"$(find "$REPO/themes" \( -name '*.tmpl' -o -name 'template.*' \) | wc -l | tr -d ' ')"
 
 
 printf '\n'

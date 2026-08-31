@@ -28,13 +28,13 @@
 # its DOM belong together:
 #
 #   templates/<id>/template.conf
-#   templates/<id>/<structure>       e.g. article.tmpl
+#   templates/<id>/<markup>          e.g. article.tmpl
 #   templates/<id>/<styling>         e.g. template.css
 #
 # with template.conf naming them:
 #
-#   template.structure = ./article.tmpl
-#   template.styling   = ./template.css
+#   markup = ./article.tmpl
+#   stylesheet   = ./template.css
 #
 # Sourced, never executed. Requires lib/conf.sh and lib/paths.sh.
 
@@ -147,34 +147,34 @@ template_select() {  # template_select <chain> <engine> <styler> <engine-dir>
 
 # The structural file a template declares, as an absolute path.
 #
-#   template_structure <template-dir>
+#   template_markup <template-dir>
 #
 # Empty when the template declares none, which is legitimate: a template may
 # exist to carry styling alone.
-template_structure() {  # template_structure <template-dir>
+template_markup() {  # template_markup <template-dir>
 	[ -n "${1:-}" ] || return 0
 	[ -f "$1/template.conf" ] || return 0
 
-	_tst=$(conf_get "$1/template.conf" template.structure)
-	[ -n "$_tst" ] || return 0
+	_tmk=$(conf_get "$1/template.conf" markup)
+	[ -n "$_tmk" ] || return 0
 
 	# Relative to the template.conf that named it, as everywhere else here.
-	case $_tst in
-		/*) _tst_p=$_tst ;;
-		*)  _tst_p="$1/$_tst" ;;
+	case $_tmk in
+		/*) _tmk_p=$_tmk ;;
+		*)  _tmk_p="$1/$_tmk" ;;
 	esac
 
-	if [ ! -f "$_tst_p" ]; then
-		template_error "template names a structure it does not have: $_tst"
+	if [ ! -f "$_tmk_p" ]; then
+		template_error "template names a markup file it does not have: $_tmk"
 		return 1
 	fi
 
-	printf '%s\n' "$(abspath "$_tst_p")"
+	printf '%s\n' "$(abspath "$_tmk_p")"
 	return 0
 }
 
 
-# Files the structure needs beside it, one absolute path per line.
+# Files the markup needs beside it, one absolute path per line.
 #
 #   template_support <template-dir>
 #
@@ -184,7 +184,7 @@ template_structure() {  # template_structure <template-dir>
 #   <!ENTITY % entities SYSTEM "global.ent"> %entities;
 #
 # and a SYSTEM identifier resolves relative to the file that names it -- so
-# staging global.tmpl on its own gives pandoc a template whose DTD subset
+# staging template.xml.pandoc on its own gives pandoc a template whose DTD subset
 # points at a file that is not there, and the parse fails before any of this
 # engine's actual work begins.
 #
@@ -221,15 +221,15 @@ template_support() {  # template_support <template-dir>
 
 # What a structural file should be called in the staged directory.
 #
-#   template_structure_name <template-dir>
+#   template_markup_name <template-dir>
 #
 # Engines look for a fixed filename -- pandoc's render wants `article.tmpl`,
 # the XSLT one wants `global.tmpl` -- so the staged name is the template's own
 # basename rather than something invented here. That keeps the engine's side
 # unchanged: it still reads one known name out of one directory, and the
 # template object decides which file ends up under it.
-template_structure_name() {  # template_structure_name <template-dir>
-	_tsn=$(template_structure "$1") || return 1
-	[ -n "$_tsn" ] || return 0
-	basename -- "$_tsn"
+template_markup_name() {  # template_markup_name <template-dir>
+	_tmn=$(template_markup "$1") || return 1
+	[ -n "$_tmn" ] || return 0
+	basename -- "$_tmn"
 }

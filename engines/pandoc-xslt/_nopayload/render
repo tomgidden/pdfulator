@@ -41,7 +41,7 @@ export XML_CATALOG_FILES="/etc/xml/catalog /usr/local/etc/xml/catalog"
 # each other. templates/docbook5-pandoc/template.conf points back at it, which
 # is exactly the indirection this mechanism exists to allow: the template says
 # where its markup is, and it need not be under templates/.
-TEMPLATE=$ENGINE/xsl/global.tmpl
+TEMPLATE=$ENGINE/xsl/template.xml.pandoc
 if [ -x "$theme/_lib/payload.sh" ]; then
 	_markup=$(sh "$theme/_lib/payload.sh" markup "$theme" 2>/dev/null || :)
 	if [ -n "$_markup" ] && [ -f "$theme/$_markup" ]; then

@@ -65,7 +65,7 @@ RUN npm install -g --unsafe-perm --ignore-scripts pagedjs-cli
 # engines' template has the same ancestry and nearly the same markup but
 # Mustache placeholders, and the two being interchangeable by filename is
 # exactly what produced a PDF with template markup printed in it.
-COPY templates/html-pandoc-pagedjs/article.tmpl /engine/article.tmpl
+COPY templates/html-pandoc-pagedjs/template.html.pandoc /engine/template.html.pandoc
 COPY engines/pandoc-pagedjs/_nopayload/metadata.lua        /engine/metadata.lua
 
 # The fallback theme, for a bare `docker run` that mounts nothing. Normally the

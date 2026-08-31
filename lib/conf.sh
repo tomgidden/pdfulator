@@ -77,8 +77,8 @@ conf_get() {  # conf_get <file> <key>
 #
 # The `+` convention lives in the *value*, not here:
 #
-#   template.styling = ./base.css     replace the list with this
-#   template.styling = +./extra.css   add this to the list
+#   stylesheet = ./base.css     replace the list with this
+#   stylesheet = +./extra.css   add this to the list
 #
 # This function returns values verbatim, leading `+` included, because whether
 # a `+` means "add" depends on what the caller is accumulating -- and stripping
@@ -105,7 +105,7 @@ conf_get_all() {  # conf_get_all <file> <key>
 		_ca_val=${_ca_line#*=}
 		_ca_val=${_ca_val#"${_ca_val%%[! 	]*}"}
 		_ca_val=${_ca_val%"${_ca_val##*[! 	]}"}
-		# A key set to nothing contributes nothing. `template.styling =` is a
+		# A key set to nothing contributes nothing. `stylesheet =` is a
 		# way to write "no styling", not a way to add an empty filename to the
 		# list -- which would become a path resolving to the config file's own
 		# directory and be read as a stylesheet.

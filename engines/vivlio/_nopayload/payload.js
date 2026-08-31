@@ -12,7 +12,7 @@
 //
 // THE PAYLOAD IS SELF-DESCRIBING, AND THAT IS THE POINT. Nothing here is told
 // what to read. Each object's conf file says what that object's files are
-// called (`template.structure`, `template.styling`), and the ORDER is
+// called (`markup`, `stylesheet`), and the ORDER is
 // structural -- recovered by walking the tree rather than read out of a
 // manifest that staging had to remember to write. An engine that hardcodes
 // `article.tmpl` and `print.css` works only for as long as every ecosystem
@@ -108,7 +108,7 @@ function confGet(file, key) {
 }
 
 // Every value for a key, in file order -- conf_get_all's contract. A list key
-// needs all of them: `template.styling = +a.css` twice means two stylesheets.
+// needs all of them: `stylesheet = +a.css` twice means two stylesheets.
 function confGetAll(file, key) {
   return readConf(file).filter(([k]) => k === key).map(([, v]) => v);
 }
@@ -118,7 +118,7 @@ function confGetAll(file, key) {
 
 // `+foo.css` adds to the list; a bare `foo.css` replaces it. The marker lives
 // on the value rather than the key because the grammar splits on the first
-// `=`: `template.styling += x` would parse as the key `template.styling ` with
+// `=`: `stylesheet += x` would parse as the key `stylesheet ` with
 // the `+` orphaned. See lib/styling.sh.
 function isAdd(value) {
   return value.startsWith('+');
@@ -279,13 +279,13 @@ export function markup(payload) {
   const tdir = templateDir(payload);
   if (!tdir) return '';
 
-  // sh: conf_get "$_cm_t/template.conf" template.structure
-  const ref = confGet(path.join(tdir, 'template.conf'), 'template.structure');
+  // sh: conf_get "$_cm_t/template.conf" markup
+  const ref = confGet(path.join(tdir, 'template.conf'), 'markup');
   if (!ref) return '';
 
   // sh: the `case $_cm_ref in /*) ... esac` join.
   // resolveRef also strips a leading `+`; the shell side does not, because
-  // template.structure is a single value rather than a list and `+` has no
+  // markup is a single value rather than a list and `+` has no
   // meaning on one. If that ever changes, both sides change together.
   const file = resolveRef(ref, tdir);
 
@@ -299,8 +299,8 @@ export function markup(payload) {
 
 // One object's stylesheets, in declaration order.
 //
-// `template.styling = +a.css` adds; a bare value replaces everything this
-// object had accumulated, which is what makes `template.styling = mine.css`
+// `stylesheet = +a.css` adds; a bare value replaces everything this
+// object had accumulated, which is what makes `stylesheet = mine.css`
 // mean "mine, and nothing inherited".
 function sheetsOf(dir) {
   const conf = ['template.conf', 'theme.conf', 'theme-engine.conf',
@@ -310,7 +310,7 @@ function sheetsOf(dir) {
   if (!conf) return [];
 
   let out = [];
-  for (const value of confGetAll(conf, 'template.styling')) {
+  for (const value of confGetAll(conf, 'stylesheet')) {
     if (!value) continue;
     const file = resolveRef(value, dir);
     if (!file || !fs.existsSync(file)) continue;
@@ -364,8 +364,8 @@ function sheetsOf(dir) {
 //
 //     level  styling_list                          here
 //     -----  -----------------------------------   ---------------------------
-//        5   engine.conf's template.styling        sheetsOf(engineDir)
-//       10   template.conf's template.styling      sheetsOf(tdir)
+//        5   engine.conf's stylesheet        sheetsOf(engineDir)
+//       10   template.conf's stylesheet      sheetsOf(tdir)
 //       20   styling_axis "" theme.conf            sub === ''
 //       30   styling_axis engines/<id>             sub === `engines/<id>`
 //       40   styling_axis stylers/<s>              sub === `stylers/<s>`

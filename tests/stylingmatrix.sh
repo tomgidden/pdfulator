@@ -118,7 +118,7 @@ ok "--css that does not exist is an error" "1" \
 
 # The template's own styling is the floor: it knows its DOM, and a theme is
 # written against it.
-printf 'template.structure = ./a.tmpl\ntemplate.styling = ./t.css\n' \
+printf 'markup = ./a.tmpl\nstylesheet = ./t.css\n' \
 	> "$BASE/templates/T/template.conf"
 echo 'TMPL' > "$BASE/templates/T/a.tmpl"
 echo '/* template */' > "$BASE/templates/T/t.css"
@@ -140,26 +140,26 @@ setup
 # A bare value REPLACES the level so far, including earlier themes: a child
 # must be able to reject a parent's stylesheet, not only add to it.
 echo '/* mine */' > "$BASE/themes/leaf/mine.css"
-printf 'extends = %s\ntemplate.styling = ./mine.css\n' \
+printf 'extends = %s\nstylesheet = ./mine.css\n' \
 	"$BASE/themes/parent" > "$BASE/themes/leaf/theme.conf"
 ok "an unmarked value replaces the level" "20:themes/leaf/mine.css" \
 	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep '^20:')"
 
 # A `+` value ADDS. The marker is on the value, not the key, because conf_get
-# splits on the first `=` -- `template.styling += x` would orphan the `+`.
-printf 'extends = %s\ntemplate.styling = +./mine.css\n' \
+# splits on the first `=` -- `stylesheet += x` would orphan the `+`.
+printf 'extends = %s\nstylesheet = +./mine.css\n' \
 	"$BASE/themes/parent" > "$BASE/themes/leaf/theme.conf"
 ok "a + value adds to the level" \
 	"20:themes/gran/print.css 20:themes/parent/print.css 20:themes/leaf/mine.css" \
 	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep '^20:' | tr '\n' ' ' | sed 's/ *$//')"
 
 # Declaring anything suppresses the conventional print.css for that theme,
-# or `template.styling = ./only-this.css` would not be true.
+# or `stylesheet = ./only-this.css` would not be true.
 ok "a declaration suppresses the theme's own print.css" "" \
 	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep 'leaf/print.css')"
 
 # So a theme wanting both names both, in the order it wants them.
-printf 'extends = %s\ntemplate.styling = +./print.css\ntemplate.styling = +./mine.css\n' \
+printf 'extends = %s\nstylesheet = +./print.css\nstylesheet = +./mine.css\n' \
 	"$BASE/themes/parent" > "$BASE/themes/leaf/theme.conf"
 ok "naming both keeps both, in the order given" \
 	"20:themes/leaf/print.css 20:themes/leaf/mine.css" \
@@ -169,7 +169,7 @@ ok "naming both keeps both, in the order given" \
 # A declaration naming a file that is not there is fatal. Silently skipping it
 # is the failure this whole area exists to stop: a theme that looks applied and
 # is not.
-printf 'extends = %s\ntemplate.styling = ./gone.css\n' \
+printf 'extends = %s\nstylesheet = ./gone.css\n' \
 	"$BASE/themes/parent" > "$BASE/themes/leaf/theme.conf"
 ok "a declared file that is missing is an error" "1" \
 	"$(styling_list "$CHAIN" E S "$BASE/engines/E" >/dev/null 2>&1; echo $?)"
@@ -177,7 +177,7 @@ ok "a declared file that is missing is an error" "1" \
 # Per-axis declarations land in their own band, not the plain one.
 setup
 echo '/* eng */' > "$BASE/themes/leaf/engines/E/eng.css"
-printf 'template.styling = +./eng.css\n' \
+printf 'stylesheet = +./eng.css\n' \
 	> "$BASE/themes/leaf/engines/E/theme-engine.conf"
 ok "theme-engine.conf declares into the engine band" "30" \
 	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep 'eng.css' | cut -d: -f1)"
@@ -275,7 +275,7 @@ ok "subdirectories beside a stylesheet are not dragged in" "no" \
 # Identity: a stylesheet the cascade selected is part of the key even when it
 # is not called print.css and not in a theme directory at all.
 setup
-printf 'template.structure = ./a.tmpl\ntemplate.styling = ./t.css\n' \
+printf 'markup = ./a.tmpl\nstylesheet = ./t.css\n' \
 	> "$BASE/templates/T/template.conf"
 echo 'TMPL' > "$BASE/templates/T/a.tmpl"
 echo '/* v1 */' > "$BASE/templates/T/t.css"
