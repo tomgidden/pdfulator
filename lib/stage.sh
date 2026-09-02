@@ -164,7 +164,7 @@ stage_root() {
 # Bump it whenever the payload's layout or its generated files change shape.
 # Cheap: the worst case is one restage per theme, which is what an upgrade
 # already implies.
-STAGE_FORMAT=2
+STAGE_FORMAT=3
 
 stage_key() {  # stage_key <chain> <engine> <styler> [css]
 	{
@@ -212,7 +212,7 @@ stage_key() {  # stage_key <chain> <engine> <styler> [css]
 			# theme-engine.conf and theme-styler.conf are here because they may
 			# select a template; a theme changing which one it uses must get a
 			# new key even though none of its own files changed.
-			for _sk_name in $STAGE_FILES $STAGE_CASCADE fonts.conf theme.conf \
+			for _sk_name in $STAGE_FILES $STAGE_CASCADE theme.conf \
 				theme-engine.conf theme-styler.conf; do
 				for _sk_where in "$_sk_dir/engines/$2" "$_sk_dir/stylers/$3" "$_sk_dir"; do
 					if [ -f "$_sk_where/$_sk_name" ]; then
@@ -306,17 +306,27 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 
 	# --- Fonts -------------------------------------------------------------------
 	#
-	# The whole chain's fonts.conf files are merged per role, then every face
-	# of every role is acquired into fonts/. A failure here stops the build
-	# unless --font-fallback was given, in which case the role simply has no
-	# file and falls back to a base-14 name in the generated CSS and params.
+	# The whole chain's conf files are merged, then every face of every BOUND
+	# font is acquired into fonts/. A failure here stops the build unless
+	# --font-fallback was given, in which case the role simply has no file and
+	# falls back to a base-14 name in the generated CSS and params.
+	#
+	# There is no fonts.conf any more: `font.<id>.*` definitions and
+	# `style.<x>.font` bindings live in the conf of whichever object declares
+	# them (§7), so the files collected here are the same ones every other
+	# cascade reads. Acquisition is demand-driven as a result -- a font nothing
+	# binds is never downloaded.
+	#
+	# Same axis order as the styling cascade: theme, then styler, then engine,
+	# each more specific than the last.
 	_sb_confs=""
 	for _sb_dir in $(printf '%s\n' "$_sb_chain"); do
 		[ -n "$_sb_dir" ] || continue
-		for _sb_where in "$_sb_dir" "$_sb_dir/stylers/$_sb_styler" \
-			"$_sb_dir/engines/$_sb_engine"; do
-			if [ -f "$_sb_where/fonts.conf" ]; then
-				_sb_confs="$_sb_confs $_sb_where/fonts.conf"
+		for _sb_where in "$_sb_dir/theme.conf" \
+			"$_sb_dir/stylers/$_sb_styler/theme-styler.conf" \
+			"$_sb_dir/engines/$_sb_engine/theme-engine.conf"; do
+			if [ -f "$_sb_where" ]; then
+				_sb_confs="$_sb_confs $_sb_where"
 			fi
 		done
 	done
@@ -896,7 +906,7 @@ stage_mirror_object() {  # stage_mirror_object <src> <out>
 
 				# fonts/ is staged by the font mechanism, which knows about
 				# roles, weights and acquisition and copies only the faces the
-				# merged fonts.conf actually asks for -- under a single name
+				# merged font table actually asks for -- under a single name
 				# per face at the payload root, which is what fonts.css and
 				# fop-fonts.xconf are generated to point at. Mirroring the
 				# directory as well would ship every face a theme happens to

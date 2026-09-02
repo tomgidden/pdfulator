@@ -7,7 +7,7 @@
  * Fonts are referred to only through the custom properties that fonts.css
  * generates -- var(--pdfulator-body) and its two siblings -- never by name.
  * That indirection is the whole point of declaring fonts by role: swapping
- * Times for Palatino is a fonts.conf change, and no stylesheet in the chain
+ * Times for Palatino is a theme.conf change, and no stylesheet in the chain
  * needs editing. The properties are always defined, for every known role,
  * whether or not this theme declared a font for it.
  */

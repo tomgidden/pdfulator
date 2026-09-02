@@ -69,11 +69,17 @@ FONT_ROLES_KNOWN="body heading mono"
 # This is what makes the whole download-on-first-use design acceptable. The
 # unthemed case must render offline, immediately, with nothing fetched; if the
 # floor needed a download, first run would be a cliff.
+# EMPTY for a role the core does not know. An invented role has no base-14
+# equivalent -- there is no "the standard pullquote font" -- and returning Times
+# for it was a bug: a theme declaring `pullquote` with a real font got
+# `--pdfulator-pullquote: Times, serif` whatever it asked for, because this fell
+# through its `*)` arm. Callers must handle empty rather than assume a name.
 fonts_base14() {  # fonts_base14 <role>
 	case $1 in
+		body)    printf 'Times\n' ;;
 		mono)    printf 'Courier\n' ;;
 		heading) printf 'Helvetica\n' ;;
-		*)       printf 'Times\n' ;;
+		*)       printf '\n' ;;
 	esac
 }
 
@@ -83,22 +89,27 @@ fonts_error() {  # fonts_error <message>
 }
 
 
-# Every role named in a fonts.conf, deduplicated, in first-appearance order.
+# Every font id defined in a conf file, deduplicated, in first-appearance order.
 #
-# A role is the part of a key before the first dot, so `body.family` and
-# `body.face.400.normal.file` both name `body`. Keys without a dot are not
-# role settings and are skipped, which leaves room for file-level settings
-# later without them being mistaken for roles.
-fonts_roles() {  # fonts_roles <fonts.conf>
+# An id is the segment after `font.`, so `font.pagella.name` and
+# `font.pagella.face.400.normal.file` both name `pagella`. Anything not under
+# `font.` is skipped -- `style.body.font` is a BINDING, not a definition, and
+# is read separately by fonts_bindings.
+#
+# A font is defined as a unit and merges wholesale per id (§7): the face keys
+# and the role binding are different keys, so a partial override that pairs one
+# family's name with another's glyph files is not representable.
+fonts_ids() {  # fonts_ids <conf>
 	[ -f "$1" ] || return 0
 
 	_fr_seen=""
 	conf_keys "$1" | while IFS= read -r _fr_key; do
 		case $_fr_key in
-			*.*) ;;
-			*)   continue ;;
+			font.*.*) ;;
+			*)        continue ;;
 		esac
-		_fr_role=${_fr_key%%.*}
+		_fr_rest=${_fr_key#font.}
+		_fr_role=${_fr_rest%%.*}
 		[ -n "$_fr_role" ] || continue
 
 		# Space-delimited membership test, with the haystack padded so that
@@ -118,15 +129,16 @@ fonts_roles() {  # fonts_roles <fonts.conf>
 # places: `body.face.400.italic.file` *is* the declaration that body has a 400
 # italic. A theme cannot then name a face it has no file for, which is the
 # Sabon shape of mistake -- a font named in one place and absent from another.
-fonts_faces() {  # fonts_faces <fonts.conf> <role>
+fonts_faces() {  # fonts_faces <conf> <font-id>
 	[ -f "$1" ] || return 0
 
 	_ff_seen=""
 	conf_keys "$1" | while IFS= read -r _ff_key; do
 		case $_ff_key in
-			"$2".face.*.*.*) ;;
+			font."$2".face.*.*.*) ;;
 			*) continue ;;
 		esac
+		_ff_key=${_ff_key#font.}
 
 		# $2.face.<weight>.<style>.<attr> -- strip the known head, then take
 		# the first two remaining components.
@@ -145,21 +157,64 @@ fonts_faces() {  # fonts_faces <fonts.conf> <role>
 }
 
 
-# Merge a cascade of fonts.conf files into one, per role.
+# Which font each role uses, as `<role> <font-id>` lines.
+#
+#   fonts_bindings <conf>
+#
+# Read from `style.<role>.font` keys. The binding is a reference by ID, not by
+# family name (§7): ids are unique because they are key prefixes in one
+# namespace, a correction to a font's `name` must not unresolve every reference
+# to it, and ids are bare words so conf_get's split-on-first-`=` needs no
+# quoting rules.
+#
+# Only `.font` -- every other `style.<x>.<prop>` is an ordinary portable
+# variable (§12) and means nothing here.
+fonts_bindings() {  # fonts_bindings <conf>
+	[ -f "$1" ] || return 0
+
+	conf_keys "$1" | while IFS= read -r _fb_key; do
+		case $_fb_key in
+			style.*.font) ;;
+			*) continue ;;
+		esac
+		_fb_role=${_fb_key#style.}
+		_fb_role=${_fb_role%.font}
+		[ -n "$_fb_role" ] || continue
+		_fb_id=$(conf_get "$1" "$_fb_key")
+		[ -n "$_fb_id" ] || continue
+		printf '%s %s\n' "$_fb_role" "$_fb_id"
+	done
+}
+
+
+# Merge a cascade of conf files into one role-keyed table.
 #
 #   fonts_merge <out> <conf>...
 #
-# Later files win, *per role* rather than per file: a theme that restates only
-# `body.*` inherits its parent's heading and mono untouched. That is what makes
-# a one-file theme possible -- theme-palatino is a fonts.conf changing the body
-# family, and nothing else -- and it is the one place this cascade deliberately
-# differs from CSS, which concatenates and lets ordinary specificity decide.
+# Two different things are merged here, by two different rules, because they
+# are two different kinds of declaration (§7):
 #
-# A role is replaced wholesale when it is mentioned at all, not merged
-# key-by-key: half-overriding a font is not a thing anyone means. Restating
-# `body.family` without restating its faces means the new family with no faces,
-# which fails the check in fonts_resolve rather than silently pairing a new
-# name with the old files.
+#   font.<id>.*        a font DEFINITION -- merged wholesale per id. A font is
+#                      one indivisible thing: its name and its face files
+#                      describe the same typeface, and a later conf mentioning
+#                      an id at all replaces the whole definition.
+#
+#   style.<x>.font     a role BINDING -- single-valued, later wins, exactly
+#                      like `extends` or `template`.
+#
+# Keeping them apart is what makes a partial override unrepresentable. The
+# earlier design had face keys and the family name under one `<role>.` prefix,
+# so per-key merging could pair one family's NAME with another's GLYPH FILES --
+# roman in Baskerville, every italic and bold in Pagella, under an @font-face
+# asserting all of it was Baskerville. Nothing reported a problem: the faces
+# have different weight/style descriptors, so the CSS rule that a later
+# @font-face replaces an identical earlier one never fires.
+#
+# THE OUTPUT IS STILL ROLE-KEYED. Bindings are resolved here, so every reader
+# downstream (fonts_css, fonts_fo_params, fonts_acquire, fonts_fop_xconf) sees
+# `<role>.name`, `<role>.face.400.normal.file` and so on, exactly as before.
+# The definition/binding split is a fact about the SOURCE conf files, not about
+# this table.
 #
 # Each output line is prefixed with the directory of the file it came from, so
 # that a `local` path stays relative to the conf that declared it after the
@@ -170,9 +225,9 @@ fonts_merge() {  # fonts_merge <out> <conf>...
 
 	: > "$_fm_out" || return 1
 
-	# Collect in reverse: the last file's roles win, so walking backwards and
-	# skipping roles already taken gives later-wins without a second pass.
-	_fm_taken=""
+	# Reverse the file list once: walking backwards and skipping what is
+	# already taken gives later-wins without a second pass, for both the
+	# bindings and the definitions.
 	_fm_files=""
 	for _fm_f in "$@"; do
 		[ -f "$_fm_f" ] || continue
@@ -180,29 +235,70 @@ fonts_merge() {  # fonts_merge <out> <conf>...
 }$_fm_files"
 	done
 
+	# --- Bindings: role -> font id, most specific conf wins ------------------
+	#
+	# Collected to a temp file rather than a variable: the dedupe needs state
+	# across lines, and a `while read` fed by a pipe runs in a subshell where
+	# any variable it sets is discarded. A file is the state.
+	_fm_pairs="$_fm_out.pairs"
+	: > "$_fm_pairs" || return 1
+
 	printf '%s\n' "$_fm_files" | while IFS= read -r _fm_file; do
 		[ -n "$_fm_file" ] || continue
 		[ -f "$_fm_file" ] || continue
-		_fm_dir=$(dirname -- "$_fm_file")
+		fonts_bindings "$_fm_file"
+	done > "$_fm_pairs.all"
 
-		for _fm_role in $(fonts_roles "$_fm_file"); do
-			case " $_fm_taken " in
-				*" $_fm_role "*) continue ;;
-			esac
-			_fm_taken="$_fm_taken $_fm_role"
+	_fm_bound=""
+	while IFS=' ' read -r _fm_role _fm_id; do
+		[ -n "$_fm_role" ] && [ -n "$_fm_id" ] || continue
+		case " $_fm_bound " in
+			*" $_fm_role "*) continue ;;
+		esac
+		_fm_bound="$_fm_bound $_fm_role"
+		printf '%s %s\n' "$_fm_role" "$_fm_id" >> "$_fm_pairs"
+	done < "$_fm_pairs.all"
+	rm -f "$_fm_pairs.all"
 
+	# --- Definitions: the most specific conf defining each bound id ----------
+	while IFS=' ' read -r _fm_role _fm_id; do
+		[ -n "$_fm_role" ] && [ -n "$_fm_id" ] || continue
+
+		printf '%s\n' "$_fm_files" | while IFS= read -r _fm_file; do
+			[ -n "$_fm_file" ] || continue
+			[ -f "$_fm_file" ] || continue
+
+			fonts_defines "$_fm_file" "$_fm_id" || continue
+
+			_fm_dir=$(dirname -- "$_fm_file")
 			conf_keys "$_fm_file" | while IFS= read -r _fm_key; do
 				case $_fm_key in
-					"$_fm_role".*) ;;
+					font."$_fm_id".*) ;;
 					*) continue ;;
 				esac
-				printf '%s\t%s\t%s\n' "$_fm_dir" "$_fm_key" \
+				# Re-keyed from font.<id>.X to <role>.X, so every reader
+				# downstream of here is unchanged.
+				printf '%s\t%s\t%s\n' "$_fm_dir" \
+					"$_fm_role.${_fm_key#font."$_fm_id".}" \
 					"$(conf_get "$_fm_file" "$_fm_key")"
 			done
+			break
 		done
-	done >> "$_fm_out"
+	done < "$_fm_pairs" >> "$_fm_out"
 
+	rm -f "$_fm_pairs"
 	return 0
+}
+
+
+# Does this conf define this font id? Status only, for use as a test.
+fonts_defines() {  # fonts_defines <conf> <font-id>
+	[ -f "$1" ] || return 1
+	conf_keys "$1" | while IFS= read -r _fdf_key; do
+		case $_fdf_key in
+			font."$2".*) printf 'y\n'; break ;;
+		esac
+	done | grep -q y
 }
 
 
@@ -337,7 +433,7 @@ fonts_acquire() {  # fonts_acquire <merged> <role> <weight> <style> <dest-dir>
 	_fa_style=$4
 	_fa_dest=$5
 
-	_fa_family=$(fonts_merged_get "$_fa_merged" "$_fa_role.family")
+	_fa_family=$(fonts_merged_get "$_fa_merged" "$_fa_role.name")
 	_fa_source=$(fonts_merged_get "$_fa_merged" "$_fa_role.source")
 	_fa_key="$_fa_role.face.$_fa_weight.$_fa_style"
 
@@ -492,7 +588,7 @@ fonts_font_missing() {  # fonts_font_missing <role> <family> <source> <reason>
 #
 #   body { font-family: var(--pdfulator-body); }
 #
-# so a stylesheet never names a font, and swapping the font is a fonts.conf
+# so a stylesheet never names a font, and swapping the font is a theme.conf
 # change with no CSS edit. The fallback in each property is the base-14 name
 # for that role, which means a role that failed to acquire under
 # --font-fallback still renders in something sensible rather than in the
@@ -507,10 +603,10 @@ fonts_css() {  # fonts_css <merged> <fonts-dir> <out>
 	_fc_out=$3
 
 	{
-		printf '/* Generated by pdfulator from fonts.conf. Do not edit. */\n\n'
+		printf '/* Generated by pdfulator from the font declarations. Do not edit. */\n\n'
 
 		for _fc_role in $(fonts_merged_roles "$_fc_merged"); do
-			_fc_family=$(fonts_merged_get "$_fc_merged" "$_fc_role.family")
+			_fc_family=$(fonts_merged_get "$_fc_merged" "$_fc_role.name")
 			[ -n "$_fc_family" ] || continue
 
 			fonts_merged_faces "$_fc_merged" "$_fc_role" | \
@@ -533,24 +629,41 @@ fonts_css() {  # fonts_css <merged> <fonts-dir> <out>
 
 		printf '\n:root {\n'
 		for _fc_role in $(fonts_merged_roles "$_fc_merged"); do
-			_fc_family=$(fonts_merged_get "$_fc_merged" "$_fc_role.family")
+			_fc_family=$(fonts_merged_get "$_fc_merged" "$_fc_role.name")
 			[ -n "$_fc_family" ] || continue
 
 			# A role whose faces all failed to acquire -- which only happens
 			# under --font-fallback, since otherwise the build has already
 			# stopped -- must NOT name its declared family here. There is no
-			# @font-face for it, so the browser would silently fall through to
-			# the generic and render in something the theme never asked for.
-			# Naming the base-14 font instead makes the substitution the one
-			# the warning announced. This is the Sabon failure exactly: a font
-			# named in one place, absent from another, and quietly replaced.
+			# @font-face for it, so the browser would silently fall through and
+			# render in something the theme never asked for. Naming the base-14
+			# font instead makes the substitution the one the warning
+			# announced. This is the Sabon failure exactly: a font named in one
+			# place, absent from another, and quietly replaced.
+			#
+			# THE GENERIC TAIL GOES WITH IT. `--pdfulator-body: "Sabon", serif`
+			# reads like prudence and is the opposite: when acquisition
+			# succeeded the tail is unreachable, and when it failed it is a
+			# silent substitution -- the very thing the branch above exists to
+			# prevent. The wrapper knows every file it placed, so the family it
+			# names is the family that renders. A tail is only correct where the
+			# name might not resolve, and here it always does.
 			if [ -z "$(fonts_role_has_file "$_fc_merged" "$_fc_fontsdir" "$_fc_role")" ]; then
+				# An INVENTED role has no base-14 equivalent, so there is
+				# nothing honest to substitute: emit no property at all rather
+				# than one naming a font the theme never asked for. A
+				# stylesheet using it falls back to whatever it already had,
+				# which is the truthful outcome.
 				_fc_family=$(fonts_base14 "$_fc_role")
+				if [ -n "$_fc_family" ]; then
+					printf '  --pdfulator-%s: %s, %s;\n' "$_fc_role" \
+						"$(fonts_css_quote "$_fc_family")" \
+						"$(fonts_css_generic "$_fc_role")"
+				fi
+			else
+				printf '  --pdfulator-%s: %s;\n' "$_fc_role" \
+					"$(fonts_css_quote "$_fc_family")"
 			fi
-
-			printf '  --pdfulator-%s: %s, %s;\n' "$_fc_role" \
-				"$(fonts_css_quote "$_fc_family")" \
-				"$(fonts_css_generic "$_fc_role")"
 		done
 
 		# Roles the theme never mentioned still get a property, so a stylesheet
@@ -558,7 +671,7 @@ fonts_css() {  # fonts_css <merged> <fonts-dir> <out>
 		# theme customised it. Without this a theme that sets only `body` would
 		# leave the others resolving to nothing at all.
 		for _fc_role in $FONT_ROLES_KNOWN; do
-			_fc_family=$(fonts_merged_get "$_fc_merged" "$_fc_role.family")
+			_fc_family=$(fonts_merged_get "$_fc_merged" "$_fc_role.name")
 			if [ -z "$_fc_family" ]; then
 				printf '  --pdfulator-%s: %s, %s;\n' "$_fc_role" \
 					"$(fonts_base14 "$_fc_role")" \
@@ -587,11 +700,15 @@ fonts_css_quote() {  # fonts_css_quote <family>
 
 
 # The generic family a role degrades to when nothing else matches.
+# The CSS generic family for a role, or empty for one the core does not know --
+# an invented role has no generic meaning, and `serif` was as wrong for it as
+# Times was.
 fonts_css_generic() {  # fonts_css_generic <role>
 	case $1 in
+		body)    printf 'serif\n' ;;
 		mono)    printf 'monospace\n' ;;
 		heading) printf 'sans-serif\n' ;;
-		*)       printf 'serif\n' ;;
+		*)       printf '\n' ;;
 	esac
 }
 
@@ -647,7 +764,7 @@ fonts_fop_xconf() {  # fonts_fop_xconf <merged> <fonts-dir> <font-base> <out>
 
 	{
 		printf '<?xml version="1.0"?>\n'
-		printf '<!-- Generated by pdfulator from fonts.conf. Do not edit. -->\n'
+		printf '<!-- Generated by pdfulator from the font declarations. Do not edit. -->\n'
 		printf '<fop version="1.0">\n'
 		printf '  <renderers>\n'
 		printf '    <renderer mime="application/pdf">\n'
@@ -657,7 +774,7 @@ fonts_fop_xconf() {  # fonts_fop_xconf <merged> <fonts-dir> <font-base> <out>
 		printf '      <fonts>\n'
 
 		for _fx_role in $(fonts_merged_roles "$_fx_merged"); do
-			_fx_family=$(fonts_merged_get "$_fx_merged" "$_fx_role.family")
+			_fx_family=$(fonts_merged_get "$_fx_merged" "$_fx_role.name")
 			[ -n "$_fx_family" ] || continue
 
 			fonts_merged_faces "$_fx_merged" "$_fx_role" | \
@@ -698,8 +815,16 @@ fonts_fop_xconf() {  # fonts_fop_xconf <merged> <fonts-dir> <font-base> <out>
 # The declaration says what a theme wants; this says what it got. They differ
 # only under --font-fallback, and every generator has to prefer the second.
 fonts_role_has_file() {  # fonts_role_has_file <merged> <fonts-dir> <role>
-	_frh_family=$(fonts_merged_get "$1" "$3.family")
+	_frh_family=$(fonts_merged_get "$1" "$3.name")
 	[ -n "$_frh_family" ] || return 0
+
+	# `source = none` is the base-14 case: no file is WANTED, so "no file
+	# found" is success rather than a missing font. Without this a role bound
+	# to a base-14 font looks like an acquisition failure and is dropped.
+	if [ "$(fonts_merged_get "$1" "$3.source")" = none ]; then
+		printf 'yes\n'
+		return 0
+	fi
 
 	fonts_merged_faces "$1" "$3" | while read -r _frh_w _frh_s; do
 		[ -n "$_frh_w" ] || continue
@@ -724,7 +849,7 @@ fonts_role_has_file() {  # fonts_role_has_file <merged> <fonts-dir> <role>
 fonts_fo_params() {  # fonts_fo_params <merged> <fonts-dir> <out>
 	{
 		for _fp_role in $FONT_ROLES_KNOWN; do
-			_fp_family=$(fonts_merged_get "$1" "$_fp_role.family")
+			_fp_family=$(fonts_merged_get "$1" "$_fp_role.name")
 			# Declared but not staged means FOP has no such font registered,
 			# and naming it would leave FOP to substitute silently -- so the
 			# base-14 name goes in instead. Same reasoning as fonts_css.

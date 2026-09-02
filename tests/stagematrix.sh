@@ -87,12 +87,14 @@ setup() {
 	printf 'extends = base\n' > "$BASE/themes/derived/theme.conf"
 
 	fakefont "$BASE/themes/base/fonts/b.otf"
-	cat > "$BASE/themes/base/fonts.conf" <<'EOF'
-body.family = Base Serif
-body.source = local
-body.face.400.normal.file = fonts/b.otf
-mono.family = Base Mono
-mono.source = none
+	cat >> "$BASE/themes/base/theme.conf" <<'EOF'
+font.baseserif.name = Base Serif
+font.baseserif.source = local
+font.baseserif.face.400.normal.file = fonts/b.otf
+font.basemono.name = Base Mono
+font.basemono.source = none
+style.body.font = baseserif
+style.mono.font = basemono
 EOF
 }
 
@@ -268,11 +270,12 @@ section "FAILURE"
 # mistake for a finished one.
 setup
 mkdir -p "$BASE/themes/broken"
-printf 'extends = base\n' > "$BASE/themes/broken/theme.conf"
-cat > "$BASE/themes/broken/fonts.conf" <<'EOF'
-body.family = Sabon
-body.source = local
-body.face.400.normal.file = fonts/Sabon.otf
+cat > "$BASE/themes/broken/theme.conf" <<'EOF'
+extends = base
+font.sabon.name = Sabon
+font.sabon.source = local
+font.sabon.face.400.normal.file = fonts/Sabon.otf
+style.body.font = sabon
 EOF
 
 before=$(ls "$BASE/home/cache" 2>/dev/null | wc -l | tr -d ' ')
