@@ -135,7 +135,7 @@ echo "============ STYLESHEET LINKS ============"
 # because the wrapper generates all three at the payload root. A bare
 # `docker run` mounts nothing, gets the image's baked-in themes/default, and
 # that directory has none of those names: it ships `default.theme.css` and a
-# `fonts.conf` from which fonts.css would be GENERATED. All three <link>s then
+# font declarations from which fonts.css would be GENERATED. All three <link>s then
 # 404, and pagedjs-cli aborts the whole render with `ProgressEvent` -- naming
 # neither the file nor the reason.
 #

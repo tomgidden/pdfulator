@@ -1,6 +1,6 @@
 # lib/conf.sh — reading flat key=value configuration.
 #
-# The lowest layer, below paths.sh: engine.conf, theme.conf and fonts.conf are
+# The lowest layer, below paths.sh: engine.conf and theme.conf are
 # all this format, and all read by conf_get.
 #
 # The format is flat key=value, chosen so it needs no parser. Such a file is
@@ -10,7 +10,7 @@
 # anything merely by being looked at. Reading it with a case-and-cut loop costs
 # a few lines and removes that entirely.
 #
-# That reasoning is why fonts.conf is this format rather than JSON. A theme is
+# That reasoning is why these are this format rather than JSON. A theme is
 # the thing users will swap and share, so a theme must be inert data; and the
 # alternative host-side parsers are worse than the format is ugly -- jq is not
 # a dependency this tool has, and a JSON parser written in sh is a bug farm.
@@ -119,7 +119,7 @@ conf_get_all() {  # conf_get_all <file> <key>
 
 # Every key in a flat key=value file, one per line, in file order.
 #
-# Used to discover what a fonts.conf declares, since roles are not a fixed
+# Used to discover what a conf declares, since font ids are not a fixed
 # list: a theme may name `body`, `heading` and `mono`, and may also name
 # `pullquote`. Duplicates are left in -- conf_get takes the first occurrence,
 # and callers that care deduplicate.
@@ -144,7 +144,7 @@ conf_keys() {  # conf_keys <file>
 # The sha256 of a file, as bare hex.
 #
 # Lives here rather than in paths.sh because its callers are all config-shaped:
-# verifying a downloaded font against the checksum in a fonts.conf, and keying
+# verifying a downloaded font against its declared checksum, and keying
 # a staging directory on the conf files that produced it. install.sh has its
 # own copy for the same reason lib/container.sh duplicates abspath -- it runs
 # before there is a lib/ to source.

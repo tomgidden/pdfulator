@@ -55,28 +55,30 @@ section "READING"
 
 setup
 mkdir -p "$BASE/themes/one"
-cat > "$BASE/themes/one/fonts.conf" <<'EOF'
+cat > "$BASE/themes/one/theme.conf" <<'EOF'
 # a comment, and a blank line follow
 
-body.family   = EB Garamond
-body.source   = local
-body.face.400.normal.file = fonts/eb-regular.otf
-body.face.700.normal.file = fonts/eb-bold.otf
-body.face.400.italic.file = fonts/eb-italic.otf
-mono.family = Noto Sans Mono
-mono.source = none
+font.body.name   = EB Garamond
+font.body.source   = local
+font.body.face.400.normal.file = fonts/eb-regular.otf
+font.body.face.700.normal.file = fonts/eb-bold.otf
+font.body.face.400.italic.file = fonts/eb-italic.otf
+font.mono.name = Noto Sans Mono
+font.mono.source = none
+style.body.font = body
+style.mono.font = mono
 EOF
 
 ok "a value is read" "EB Garamond" \
-	"$(conf_get "$BASE/themes/one/fonts.conf" body.family)"
+	"$(conf_get "$BASE/themes/one/theme.conf" font.body.name)"
 ok "whitespace around = is ignored" "local" \
-	"$(conf_get "$BASE/themes/one/fonts.conf" body.source)"
+	"$(conf_get "$BASE/themes/one/theme.conf" font.body.source)"
 ok "roles are found" "body mono" \
-	"$(fonts_roles "$BASE/themes/one/fonts.conf" | tr '\n' ' ' | sed 's/ $//')"
+	"$(fonts_ids "$BASE/themes/one/theme.conf" | tr '\n' ' ' | sed 's/ $//')"
 ok "faces are found, deduplicated" "400 normal|700 normal|400 italic" \
-	"$(fonts_faces "$BASE/themes/one/fonts.conf" body | tr '\n' '|' | sed 's/|$//')"
+	"$(fonts_faces "$BASE/themes/one/theme.conf" body | tr '\n' '|' | sed 's/|$//')"
 ok "a role with no faces has none" "" \
-	"$(fonts_faces "$BASE/themes/one/fonts.conf" mono)"
+	"$(fonts_faces "$BASE/themes/one/theme.conf" mono)"
 
 
 section "MERGING"
@@ -85,28 +87,32 @@ section "MERGING"
 # font must inherit the rest untouched, so that a theme can be one short file.
 setup
 mkdir -p "$BASE/themes/parent" "$BASE/themes/child"
-cat > "$BASE/themes/parent/fonts.conf" <<'EOF'
-body.family = Parent Serif
-body.source = none
-heading.family = Parent Sans
-heading.source = none
-mono.family = Parent Mono
-mono.source = none
+cat > "$BASE/themes/parent/theme.conf" <<'EOF'
+font.body.name = Parent Serif
+font.body.source = none
+font.heading.name = Parent Sans
+font.heading.source = none
+font.mono.name = Parent Mono
+font.mono.source = none
+style.body.font = body
+style.heading.font = heading
+style.mono.font = mono
 EOF
-cat > "$BASE/themes/child/fonts.conf" <<'EOF'
-body.family = Child Serif
-body.source = none
+cat > "$BASE/themes/child/theme.conf" <<'EOF'
+font.body.name = Child Serif
+font.body.source = none
+style.body.font = body
 EOF
 
 fonts_merge "$BASE/merged" \
-	"$BASE/themes/parent/fonts.conf" "$BASE/themes/child/fonts.conf"
+	"$BASE/themes/parent/theme.conf" "$BASE/themes/child/theme.conf"
 
 ok "the child's role wins" "Child Serif" \
-	"$(fonts_merged_get "$BASE/merged" body.family)"
+	"$(fonts_merged_get "$BASE/merged" body.name)"
 ok "an unmentioned role is inherited" "Parent Sans" \
-	"$(fonts_merged_get "$BASE/merged" heading.family)"
+	"$(fonts_merged_get "$BASE/merged" heading.name)"
 ok "and so is another" "Parent Mono" \
-	"$(fonts_merged_get "$BASE/merged" mono.family)"
+	"$(fonts_merged_get "$BASE/merged" mono.name)"
 ok "every role is present once" "body heading mono" \
 	"$(fonts_merged_roles "$BASE/merged" | sort | tr '\n' ' ' | sed 's/ $//')"
 
@@ -116,24 +122,26 @@ ok "every role is present once" "body heading mono" \
 # the parent's keys in the file -- and the next reader to iterate rather than
 # look up would see the role twice.
 ok "the losing copy is not left in the file" "1" \
-	"$(grep -c 'body\.family' "$BASE/merged")"
+	"$(grep -c 'body\.name' "$BASE/merged")"
 ok "nor its value" "" \
 	"$(grep 'Parent Serif' "$BASE/merged")"
 
 # A role is replaced wholesale, not merged key by key: a child naming a new
 # family without naming faces must not inherit the parent's *files*, which
 # would pair a new name with the old glyphs.
-cat > "$BASE/themes/parent/fonts.conf" <<'EOF'
-body.family = Parent Serif
-body.source = local
-body.face.400.normal.file = fonts/parent.otf
+cat > "$BASE/themes/parent/theme.conf" <<'EOF'
+font.body.name = Parent Serif
+font.body.source = local
+font.body.face.400.normal.file = fonts/parent.otf
+style.body.font = body
 EOF
-cat > "$BASE/themes/child/fonts.conf" <<'EOF'
-body.family = Child Serif
-body.source = none
+cat > "$BASE/themes/child/theme.conf" <<'EOF'
+font.body.name = Child Serif
+font.body.source = none
+style.body.font = body
 EOF
 fonts_merge "$BASE/merged2" \
-	"$BASE/themes/parent/fonts.conf" "$BASE/themes/child/fonts.conf"
+	"$BASE/themes/parent/theme.conf" "$BASE/themes/child/theme.conf"
 ok "a replaced role keeps none of the parent's faces" "" \
 	"$(fonts_merged_faces "$BASE/merged2" body)"
 
@@ -141,18 +149,20 @@ ok "a replaced role keeps none of the parent's faces" "" \
 # merge has combined files from different directories.
 setup
 mkdir -p "$BASE/themes/a" "$BASE/themes/b"
-cat > "$BASE/themes/a/fonts.conf" <<'EOF'
-mono.family = A Mono
-mono.source = local
-mono.face.400.normal.file = fonts/a.otf
+cat > "$BASE/themes/a/theme.conf" <<'EOF'
+font.mono.name = A Mono
+font.mono.source = local
+font.mono.face.400.normal.file = fonts/a.otf
+style.mono.font = mono
 EOF
-cat > "$BASE/themes/b/fonts.conf" <<'EOF'
-body.family = B Serif
-body.source = local
-body.face.400.normal.file = fonts/b.otf
+cat > "$BASE/themes/b/theme.conf" <<'EOF'
+font.body.name = B Serif
+font.body.source = local
+font.body.face.400.normal.file = fonts/b.otf
+style.body.font = body
 EOF
 fonts_merge "$BASE/merged3" \
-	"$BASE/themes/a/fonts.conf" "$BASE/themes/b/fonts.conf"
+	"$BASE/themes/a/theme.conf" "$BASE/themes/b/theme.conf"
 ok "each role remembers its own directory" "$BASE/themes/a" \
 	"$(fonts_merged_dir "$BASE/merged3" mono.face.400.normal.file)"
 ok "and the other one too" "$BASE/themes/b" \
@@ -164,12 +174,13 @@ section "ACQUIRING"
 setup
 mkdir -p "$BASE/themes/local"
 fakefont "$BASE/themes/local/fonts/real.otf"
-cat > "$BASE/themes/local/fonts.conf" <<'EOF'
-body.family = Real Font
-body.source = local
-body.face.400.normal.file = fonts/real.otf
+cat > "$BASE/themes/local/theme.conf" <<'EOF'
+font.body.name = Real Font
+font.body.source = local
+font.body.face.400.normal.file = fonts/real.otf
+style.body.font = body
 EOF
-fonts_merge "$BASE/m" "$BASE/themes/local/fonts.conf"
+fonts_merge "$BASE/m" "$BASE/themes/local/theme.conf"
 
 out=$(fonts_acquire "$BASE/m" body 400 normal "$BASE/stage/fonts")
 ok "a local face is staged" "real-font-400-normal.otf" "$out"
@@ -177,12 +188,13 @@ ok "and the file is really there" "yes" \
 	"$([ -f "$BASE/stage/fonts/real-font-400-normal.otf" ] && echo yes || echo no)"
 
 # The Sabon case: named, absent, and until now silently rendered as Times.
-cat > "$BASE/themes/local/fonts.conf" <<'EOF'
-body.family = Sabon
-body.source = local
-body.face.400.normal.file = fonts/Sabon.otf
+cat > "$BASE/themes/local/theme.conf" <<'EOF'
+font.body.name = Sabon
+font.body.source = local
+font.body.face.400.normal.file = fonts/Sabon.otf
+style.body.font = body
 EOF
-fonts_merge "$BASE/m2" "$BASE/themes/local/fonts.conf"
+fonts_merge "$BASE/m2" "$BASE/themes/local/theme.conf"
 
 err=$(fonts_acquire "$BASE/m2" body 400 normal "$BASE/stage/fonts" 2>&1); st=$?
 ok "a missing font fails" "1" "$st"
@@ -202,11 +214,12 @@ ok "and says so" "yes" \
 	"$(printf '%s' "$err" | grep -q 'Warning' && echo yes || echo no)"
 unset PDFULATOR_FONT_FALLBACK
 
-cat > "$BASE/themes/local/fonts.conf" <<'EOF'
-body.family = Whatever
-body.source = google
+cat > "$BASE/themes/local/theme.conf" <<'EOF'
+font.body.name = Whatever
+font.body.source = google
+style.body.font = body
 EOF
-fonts_merge "$BASE/m3" "$BASE/themes/local/fonts.conf"
+fonts_merge "$BASE/m3" "$BASE/themes/local/theme.conf"
 err=$(fonts_acquire "$BASE/m3" body 400 normal "$BASE/stage/fonts" 2>&1); st=$?
 ok "an unknown source fails" "1" "$st"
 ok "and names what it expected" "yes" \
@@ -231,13 +244,14 @@ mkdir -p "$BASE/themes/dl"
 fakefont "$BASE/src.ttf"
 good=$(conf_hash_file "$BASE/src.ttf")
 
-cat > "$BASE/themes/dl/fonts.conf" <<EOF
-body.family = Downloaded
-body.source = url
-body.face.400.normal.url = file://$BASE/src.ttf
-body.face.400.normal.sha256 = $good
+cat > "$BASE/themes/dl/theme.conf" <<EOF
+font.body.name = Downloaded
+font.body.source = url
+font.body.face.400.normal.url = file://$BASE/src.ttf
+font.body.face.400.normal.sha256 = $good
+style.body.font = body
 EOF
-fonts_merge "$BASE/md" "$BASE/themes/dl/fonts.conf"
+fonts_merge "$BASE/md" "$BASE/themes/dl/theme.conf"
 out=$(fonts_acquire "$BASE/md" body 400 normal "$BASE/stage/fonts" 2>/dev/null); st=$?
 ok "a good checksum is accepted" "0" "$st"
 ok "and the face is staged" "downloaded-400-normal.ttf" "$out"
@@ -247,13 +261,14 @@ ok "and cached for next time" "yes" \
 setup
 mkdir -p "$BASE/themes/dl"
 fakefont "$BASE/src.ttf"
-cat > "$BASE/themes/dl/fonts.conf" <<EOF
-body.family = Tampered
-body.source = url
-body.face.400.normal.url = file://$BASE/src.ttf
-body.face.400.normal.sha256 = 0000000000000000000000000000000000000000000000000000000000000000
+cat > "$BASE/themes/dl/theme.conf" <<EOF
+font.body.name = Tampered
+font.body.source = url
+font.body.face.400.normal.url = file://$BASE/src.ttf
+font.body.face.400.normal.sha256 = 0000000000000000000000000000000000000000000000000000000000000000
+style.body.font = body
 EOF
-fonts_merge "$BASE/mt" "$BASE/themes/dl/fonts.conf"
+fonts_merge "$BASE/mt" "$BASE/themes/dl/theme.conf"
 err=$(fonts_acquire "$BASE/mt" body 400 normal "$BASE/stage/fonts" 2>&1); st=$?
 ok "a bad checksum fails" "1" "$st"
 ok "and shows both hashes" "yes" \
@@ -278,13 +293,14 @@ setup
 mkdir -p "$BASE/themes/gen"
 fakefont "$BASE/themes/gen/fonts/r.otf"
 fakefont "$BASE/themes/gen/fonts/i.otf"
-cat > "$BASE/themes/gen/fonts.conf" <<'EOF'
-body.family = TeX Gyre Pagella
-body.source = local
-body.face.400.normal.file = fonts/r.otf
-body.face.400.italic.file = fonts/i.otf
+cat > "$BASE/themes/gen/theme.conf" <<'EOF'
+font.body.name = TeX Gyre Pagella
+font.body.source = local
+font.body.face.400.normal.file = fonts/r.otf
+font.body.face.400.italic.file = fonts/i.otf
+style.body.font = body
 EOF
-fonts_merge "$BASE/mg" "$BASE/themes/gen/fonts.conf"
+fonts_merge "$BASE/mg" "$BASE/themes/gen/theme.conf"
 fonts_acquire "$BASE/mg" body 400 normal "$BASE/stage/fonts" >/dev/null
 fonts_acquire "$BASE/mg" body 400 italic "$BASE/stage/fonts" >/dev/null
 fonts_css "$BASE/mg" "$BASE/stage/fonts" "$BASE/stage/fonts.css"
@@ -301,6 +317,15 @@ ok "an .otf is opentype" "yes" \
 ok "src is relative to the staged directory" "yes" \
 	"$(grep -q 'url(fonts/' "$BASE/stage/fonts.css" && echo yes || echo no)"
 ok "the role becomes a custom property" "yes" \
+	"$(grep -q -- '--pdfulator-body: "TeX Gyre Pagella";' \
+	   "$BASE/stage/fonts.css" && echo yes || echo no)"
+
+# NO GENERIC TAIL on a font that resolved. `"Sabon", serif` reads like prudence
+# and is the opposite: the wrapper placed the file, so the tail is unreachable
+# when acquisition succeeded and a silent substitution when it did not -- which
+# is the Sabon failure the rest of this file exists to prevent. The tail stays
+# only where the name might not resolve: the base-14 substitution below.
+ok "and carries no generic fallback" "no" \
 	"$(grep -q -- '--pdfulator-body: "TeX Gyre Pagella", serif' \
 	   "$BASE/stage/fonts.css" && echo yes || echo no)"
 
@@ -319,12 +344,13 @@ ok "and the right base-14 one" "yes" \
 # exact failure this whole design exists to prevent.
 setup
 mkdir -p "$BASE/themes/absent"
-cat > "$BASE/themes/absent/fonts.conf" <<'EOF'
-body.family = Sabon
-body.source = local
-body.face.400.normal.file = fonts/Sabon.otf
+cat > "$BASE/themes/absent/theme.conf" <<'EOF'
+font.body.name = Sabon
+font.body.source = local
+font.body.face.400.normal.file = fonts/Sabon.otf
+style.body.font = body
 EOF
-fonts_merge "$BASE/ma" "$BASE/themes/absent/fonts.conf"
+fonts_merge "$BASE/ma" "$BASE/themes/absent/theme.conf"
 PDFULATOR_FONT_FALLBACK=1
 fonts_acquire "$BASE/ma" body 400 normal "$BASE/stage/fonts" >/dev/null 2>&1
 unset PDFULATOR_FONT_FALLBACK
@@ -344,12 +370,13 @@ section "GENERATING FOP"
 setup
 mkdir -p "$BASE/themes/fop"
 fakefont "$BASE/themes/fop/fonts/r.ttf"
-cat > "$BASE/themes/fop/fonts.conf" <<'EOF'
-body.family = Figtree
-body.source = local
-body.face.700.normal.file = fonts/r.ttf
+cat > "$BASE/themes/fop/theme.conf" <<'EOF'
+font.body.name = Figtree
+font.body.source = local
+font.body.face.700.normal.file = fonts/r.ttf
+style.body.font = body
 EOF
-fonts_merge "$BASE/mf" "$BASE/themes/fop/fonts.conf"
+fonts_merge "$BASE/mf" "$BASE/themes/fop/theme.conf"
 fonts_acquire "$BASE/mf" body 700 normal "$BASE/stage/fonts" >/dev/null
 fonts_fop_xconf "$BASE/mf" "$BASE/stage/fonts" /payload/fonts "$BASE/stage/fop.xconf"
 
@@ -372,12 +399,13 @@ ok "and the declared family name" "yes" \
 setup
 mkdir -p "$BASE/themes/woff"
 fakefont "$BASE/themes/woff/fonts/w.woff2"
-cat > "$BASE/themes/woff/fonts.conf" <<'EOF'
-body.family = Webby
-body.source = local
-body.face.400.normal.file = fonts/w.woff2
+cat > "$BASE/themes/woff/theme.conf" <<'EOF'
+font.body.name = Webby
+font.body.source = local
+font.body.face.400.normal.file = fonts/w.woff2
+style.body.font = body
 EOF
-fonts_merge "$BASE/mw" "$BASE/themes/woff/fonts.conf"
+fonts_merge "$BASE/mw" "$BASE/themes/woff/theme.conf"
 fonts_acquire "$BASE/mw" body 400 normal "$BASE/stage/fonts" >/dev/null
 warn=$(fonts_fop_xconf "$BASE/mw" "$BASE/stage/fonts" /payload/fonts \
 	"$BASE/stage/woff.xconf" 2>&1)
@@ -393,12 +421,13 @@ section "GENERATING XSL PARAMS"
 setup
 mkdir -p "$BASE/themes/xsl"
 fakefont "$BASE/themes/xsl/fonts/r.otf"
-cat > "$BASE/themes/xsl/fonts.conf" <<'EOF'
-body.family = TeX Gyre Pagella
-body.source = local
-body.face.400.normal.file = fonts/r.otf
+cat > "$BASE/themes/xsl/theme.conf" <<'EOF'
+font.body.name = TeX Gyre Pagella
+font.body.source = local
+font.body.face.400.normal.file = fonts/r.otf
+style.body.font = body
 EOF
-fonts_merge "$BASE/mx" "$BASE/themes/xsl/fonts.conf"
+fonts_merge "$BASE/mx" "$BASE/themes/xsl/theme.conf"
 fonts_acquire "$BASE/mx" body 400 normal "$BASE/stage/fonts" >/dev/null
 fonts_fo_params "$BASE/mx" "$BASE/stage/fonts" "$BASE/stage/fo-params"
 
@@ -410,6 +439,118 @@ ok "and mono gets Courier" "Courier" \
 	"$(grep '^mono	' "$BASE/stage/fo-params" | cut -f2)"
 ok "every known role is covered" "3" \
 	"$(wc -l < "$BASE/stage/fo-params" | tr -d ' ')"
+
+
+section "DEFINITIONS AND BINDINGS"
+
+# THE POINT OF THE font.<id> / style.<x>.font SPLIT.
+#
+# A child theme changing its body font must get that font and ONLY that font.
+# The earlier design put the family name and the face files under one `<role>.`
+# prefix, so per-key merging could pair one family's NAME with another's GLYPH
+# FILES: roman in Baskerville, every italic and bold in Pagella, under an
+# @font-face asserting all of it was Baskerville. Nothing reported it -- the
+# faces have different weight/style descriptors, so the CSS rule that a later
+# @font-face replaces an identical earlier one never fires.
+#
+# With the split it is not representable: face keys live under font.<id>, the
+# binding lives under style.<x>.font, and they are different keys.
+setup
+mkdir -p "$BASE/themes/p2" "$BASE/themes/c2"
+cat > "$BASE/themes/p2/theme.conf" <<'EOF'
+font.pagella.name = TeX Gyre Pagella
+font.pagella.source = none
+font.pagella.face.400.normal.file = fonts/pagella-regular.otf
+font.pagella.face.400.italic.file = fonts/pagella-italic.otf
+font.pagella.face.700.normal.file = fonts/pagella-bold.otf
+font.opensans.name = Open Sans
+font.opensans.source = none
+style.body.font = pagella
+style.heading.font = opensans
+EOF
+cat > "$BASE/themes/c2/theme.conf" <<'EOF'
+font.baskerville.name = Baskerville
+font.baskerville.source = none
+font.baskerville.face.400.normal.file = fonts/baskerville-regular.otf
+style.body.font = baskerville
+EOF
+fonts_merge "$BASE/split" \
+	"$BASE/themes/p2/theme.conf" "$BASE/themes/c2/theme.conf"
+
+ok "the binding picks the child's font" "Baskerville" \
+	"$(fonts_merged_get "$BASE/split" body.name)"
+
+# The heart of it: NONE of the parent's faces survive under the child's name.
+ok "and none of the parent's faces come with it" "400 normal" \
+	"$(fonts_merged_faces "$BASE/split" body | tr '\n' '|' | sed 's/|$//')"
+ok "no parent face file is re-labelled" "0" \
+	"$(grep -c 'pagella' "$BASE/split")"
+
+# A role the child never mentioned keeps the parent's binding untouched, which
+# is what makes a one-line theme possible.
+ok "an unbound role is inherited whole" "Open Sans" \
+	"$(fonts_merged_get "$BASE/split" heading.name)"
+
+# A definition nothing binds is never merged in -- which is what makes
+# acquisition demand-driven: an unreferenced font is never downloaded.
+ok "an unreferenced definition is not staged" "0" \
+	"$(grep -c 'Open Sans' "$BASE/themes/c2/theme.conf")"
+setup
+mkdir -p "$BASE/themes/un"
+cat > "$BASE/themes/un/theme.conf" <<'EOF'
+font.used.name = Used
+font.used.source = none
+font.spare.name = Spare
+font.spare.source = none
+style.body.font = used
+EOF
+fonts_merge "$BASE/unref" "$BASE/themes/un/theme.conf"
+ok "an unbound font never reaches the merge" "0" \
+	"$(grep -c 'Spare' "$BASE/unref")"
+
+# Roles stay OPEN: a theme may invent one, and it reaches CSS. It does NOT
+# reach fo-params, because FOP has a fixed idea of what a document's fonts are
+# for and an invented role has no generic meaning to a typesetter.
+#
+# The bug this pins: fonts_base14 and fonts_css_generic both fell through a
+# `*)` arm, so an invented role got `Times, serif` whatever it declared.
+setup
+mkdir -p "$BASE/themes/inv" "$BASE/stage/fonts"
+cat > "$BASE/themes/inv/theme.conf" <<'EOF'
+font.georgia.name = Georgia
+font.georgia.source = none
+style.pullquote.font = georgia
+EOF
+fonts_merge "$BASE/mi" "$BASE/themes/inv/theme.conf"
+fonts_css "$BASE/mi" "$BASE/stage/fonts" "$BASE/stage/inv.css"
+ok "an invented role gets what it declared" "yes" \
+	"$(grep -q -- '--pdfulator-pullquote: Georgia;' "$BASE/stage/inv.css" \
+	   && echo yes || echo no)"
+ok "and not body's base-14 font" "no" \
+	"$(grep -q -- '--pdfulator-pullquote: Times' "$BASE/stage/inv.css" \
+	   && echo yes || echo no)"
+
+fonts_fo_params "$BASE/mi" "$BASE/stage/fonts" "$BASE/stage/inv-params"
+ok "an invented role is not given to FOP" "0" \
+	"$(grep -c 'pullquote' "$BASE/stage/inv-params")"
+
+# And the FAILURE path, which is where fonts_base14 is actually consulted: a
+# `local` font whose file never arrived. A known role substitutes its base-14
+# name; an invented one has no base-14 equivalent -- there is no "the standard
+# pullquote font" -- so it must emit NOTHING rather than silently naming Times,
+# which is what the `*)` arm used to do.
+setup
+mkdir -p "$BASE/themes/inv2" "$BASE/stage/fonts"
+cat > "$BASE/themes/inv2/theme.conf" <<'EOF'
+font.missing.name = Missing Face
+font.missing.source = local
+font.missing.face.400.normal.file = fonts/nope.otf
+style.pullquote.font = missing
+EOF
+fonts_merge "$BASE/mi2" "$BASE/themes/inv2/theme.conf"
+fonts_css "$BASE/mi2" "$BASE/stage/fonts" "$BASE/stage/inv2.css"
+ok "an unresolvable invented role emits no property" "0" \
+	"$(grep -c -- '--pdfulator-pullquote' "$BASE/stage/inv2.css")"
 
 
 printf '\n'

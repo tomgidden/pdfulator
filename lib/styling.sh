@@ -145,7 +145,7 @@ styling_resolve() {  # styling_resolve <value> <base-dir>
 #
 # Returns 0 (true) for `+foo.css`, 1 for `foo.css`. A plain value replacing its
 # level is what makes `stylesheet = mine.css` mean "mine, and nothing the
-# parent had" -- the same wholesale-replace reading fonts.conf uses per role.
+# parent had" -- the same wholesale-replace reading a font definition uses.
 styling_is_add() {  # styling_is_add <value>
 	case ${1:-} in
 		'+'*) return 0 ;;

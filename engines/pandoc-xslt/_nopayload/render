@@ -138,7 +138,7 @@ perl -pi -e 's/(<programlisting[^\n]+)\n/$1/g;' "$WORK/$leaf.xml"
 # --path is how the stylesheet finds titlepages.xsl and the rest beside it.
 #
 # The font parameters come from the payload's fo-params, a role-per-line
-# file the wrapper generated from fonts.conf. fo.xsl has always parameterised
+# file the wrapper generated from the font declarations. fo.xsl has always parameterised
 # its families -- serif.font.family and the rest are xsl:param -- but nothing
 # ever passed them, so a theme could only change a font by replacing the whole
 # stylesheet. This is the missing half of that.

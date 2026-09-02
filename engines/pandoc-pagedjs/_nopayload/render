@@ -75,7 +75,7 @@ fi
 # are all present whenever a payload is mounted and the hardcoding was
 # invisible. A bare `docker run` mounts no payload, gets the image's baked-in
 # themes/default, and that directory has none of those three names in it: it
-# ships `default.theme.css` and a `fonts.conf` from which fonts.css would be
+# ships `default.theme.css` and font declarations from which fonts.css would be
 # GENERATED. Three <link>s then 404, and pagedjs-cli does not treat a failed
 # stylesheet load as cosmetic -- it aborts the render with `ProgressEvent`,
 # which names neither the file nor the reason.

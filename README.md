@@ -319,8 +319,7 @@ style, which you'd only catch by eye.
 
 ```
 my_theme/
-  theme.conf                    name, description, and what it extends
-  fonts.conf                    fonts, by role
+  theme.conf                    name, what it extends, fonts, features
   print.css                     styling for any engine
   fonts/                        font files, if it ships any
   stylers/vivliostyle/          styling for a particular renderer
@@ -366,28 +365,46 @@ child's rules win by ordinary precedence. Fonts are inherited **per role**, so
 a theme changing only its body font keeps its parent's headings and monospace
 untouched — which means a theme can be one short file.
 
-**Fonts are declared, not linked.** `fonts.conf` names them by role:
+**Fonts are declared, not linked.** A font is *defined* once, then *bound* to a
+role — both in `theme.conf`:
 
 ```conf
-body.family = EB Garamond
-body.source = local
-body.face.400.normal.file = fonts/EBGaramond-Regular.ttf
-body.face.700.normal.file = fonts/EBGaramond-Bold.ttf
+font.garamond.name   = EB Garamond
+font.garamond.source = local
+font.garamond.face.400.normal.file = fonts/EBGaramond-Regular.ttf
+font.garamond.face.700.normal.file = fonts/EBGaramond-Bold.ttf
 
-heading.family = Figtree
-heading.source = url
-heading.face.400.normal.url    = https://example.org/Figtree-Regular.ttf
-heading.face.400.normal.sha256 = a1b2c3...
+font.figtree.name   = Figtree
+font.figtree.source = url
+font.figtree.face.400.normal.url    = https://example.org/Figtree-Regular.ttf
+font.figtree.face.400.normal.sha256 = a1b2c3...
+
+style.body.font    = garamond
+style.heading.font = figtree
 ```
+
+`font.<id>` is just a handle — `garamond` here — used to refer to the font from
+a `style.<role>.font` line. It never reaches the document; `font.<id>.name` is
+the real typeface name that does.
 
 `source` is `local` (a file in the theme), `url` (fetched once, cached under
 `$PDFULATOR_HOME/fonts/`, verified if you give a checksum) or `none` (the
 standard PDF fonts, which need no file at all).
 
-The roles `body`, `heading` and `mono` are understood by every engine. That
-indirection is the point: your stylesheets refer to
-`var(--pdfulator-body)` rather than to a font by name, so changing the font is a
-`fonts.conf` edit and no CSS changes at all. `pdfulator` generates whatever the
+Splitting the definition from the binding is what makes overriding safe. A
+child theme swapping the body font writes one `style.body.font` line and its own
+`font.<id>` block; it cannot accidentally inherit half of the parent's font,
+which would pair one typeface's name with another's italic and bold files and
+render the difference without ever reporting it.
+
+A font nothing binds is never downloaded, so a theme may define more than it
+uses.
+
+The roles `body`, `heading` and `mono` are understood by every engine. You may
+invent others — they become custom properties for CSS engines, though FOP and
+other typesetters only understand the three. That indirection is the point:
+your stylesheets refer to `var(--pdfulator-body)` rather than to a font by name,
+so changing the font is a `theme.conf` edit and no CSS changes at all. `pdfulator` generates whatever the
 chosen engine actually needs from that one declaration — `@font-face` rules for
 the browser engines, an explicit font configuration for FOP.
 
@@ -634,5 +651,5 @@ I've bundled those fonts purely for performance and simplicity: otherwise they
 either need downloading on each invocation, or caching somehow between Docker
 runs, leaving junk on the host machine. I hope that's okay within the terms of
 those licences. A theme you write yourself can equally well fetch its fonts
-rather than ship them — see `fonts.conf` above — in which case they are cached
+rather than ship them — see the font declarations above — in which case they are cached
 once under `$PDFULATOR_HOME/fonts/` and shared between themes.

@@ -76,7 +76,7 @@ COPY engines/pandoc-pagedjs/_nopayload/metadata.lua        /engine/metadata.lua
 # links only the stylesheets it can actually find.
 #
 # themes/default no longer carries a template of its own -- that moved to
-# templates/html-mustache-vivlio -- so this is stylesheets and fonts.conf only,
+# templates/html-mustache-vivlio -- so this is stylesheets and theme.conf only,
 # and there is no longer any way for a Mustache template to arrive here under a
 # name pandoc would read.
 COPY themes/default /payload

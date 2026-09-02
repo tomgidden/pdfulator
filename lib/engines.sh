@@ -57,7 +57,7 @@ engines_list() {
 # which are optional with a sensible empty meaning.
 #
 # The reading itself is conf_get (lib/conf.sh), shared with theme.conf and
-# fonts.conf. This wrapper exists because callers name an engine, not a path:
+# theme.conf. This wrapper exists because callers name an engine, not a path:
 # engine_get vivlio styler rather than a directory they had to build first.
 engine_get() {  # engine_get <id> <key>
 	conf_get "$ENGINES_DIR/$1/engine.conf" "$2"
