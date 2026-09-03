@@ -77,8 +77,11 @@
 # per-document sidecar and a project .pdfulator.conf are both already sketched.
 # 5 rather than 0 for the engine, because 0 reads like "unset" in a numeric
 # field and because something may yet want to sit below it.
-STYLING_LEVELS="5:engine 10:template 20:theme 30:theme-engine 40:theme-styler \
-                50:document 60:command-line"
+# 25 for theme-template rather than renumbering: the spacing exists precisely
+# so an axis can be inserted without moving the ones either side, and this is
+# the first time it has been used for that.
+STYLING_LEVELS="5:engine 10:template 20:theme 25:theme-template \
+                30:theme-engine 40:theme-styler 50:document 60:command-line"
 
 
 styling_error() {  # styling_error <message>
@@ -319,6 +322,20 @@ styling_list() {  # styling_list <chain> <engine> <styler> <engine-dir> [css]
 	# whole chain before the next axis starts, so a child's plain sheet cannot
 	# be beaten by an ancestor's engine-specific one.
 	styling_axis "$_sl_chain" "" theme.conf 20 || return 1
+
+	# templates/ BEFORE engines/ and stylers/ (§6). The markup is what you are
+	# styling; an engine's quirks are narrower than the markup they apply to,
+	# and the styler paginates and so gets the last word.
+	#
+	# The axis is keyed on the template that was SELECTED, which template_select
+	# resolved above -- not on a name the theme picks. A theme styling
+	# `templates/html-mustache-vivlio/` is saying "when this markup is in play",
+	# and that is only meaningful against the template actually chosen.
+	if [ -n "$_sl_tdir" ]; then
+		styling_axis "$_sl_chain" "templates/$(basename -- "$_sl_tdir")" \
+			theme-template.conf 25 || return 1
+	fi
+
 	styling_axis "$_sl_chain" "engines/$_sl_engine" theme-engine.conf 30 || return 1
 	styling_axis "$_sl_chain" "stylers/$_sl_styler" theme-styler.conf 40 || return 1
 

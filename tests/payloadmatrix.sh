@@ -328,6 +328,14 @@ else
 		printf 'stylesheet = +./%s-sty.css\n' "$t" \
 			> "$C/themes/$t/stylers/sty/theme-styler.conf"
 		printf '/* %s sty */\n' "$t" > "$C/themes/$t/stylers/sty/$t-sty.css"
+		# The templates/ axis (§6), keyed on the selected template. Present on
+		# every theme in the chain so the band is walked root-first like the
+		# others -- an axis exercised at only one level cannot show a
+		# chain-order mistake.
+		mkdir -p "$C/themes/$t/templates/tmpl"
+		printf 'stylesheet = +./%s-tpl.css\n' "$t" \
+			> "$C/themes/$t/templates/tmpl/theme-template.conf"
+		printf '/* %s tpl */\n' "$t" > "$C/themes/$t/templates/tmpl/$t-tpl.css"
 		# `features` down the same chain: base sets, the others add. This is
 		# what replaced the hardcoded theme.yaml lookup, and it uses the same
 		# `+`/replace grammar as `stylesheet`.
@@ -350,7 +358,7 @@ else
 		done | tr '\n' ' ' | sed 's/ $//')
 
 	ok "the shell resolves axis-outer, chain-inner" \
-	   "engine.css base.css base-extra.css mid.css mid-extra.css leaf.css leaf-extra.css base-sty.css mid-sty.css leaf-sty.css" "$SH"
+	   "engine.css base.css base-extra.css mid.css mid-extra.css leaf.css leaf-extra.css base-tpl.css mid-tpl.css leaf-tpl.css base-sty.css mid-sty.css leaf-sty.css" "$SH"
 
 	# Stage it, then ask the JS reader the same question of the result.
 	P2="$BASE/cascade-payload"
