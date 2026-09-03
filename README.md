@@ -325,8 +325,25 @@ my_theme/
   stylers/vivliostyle/          styling for a particular renderer
   stylers/pagedjs/
   engines/pandoc-xslt/          ...or for one specific engine
+  templates/html-mustache-vivlio/   ...or for one particular markup
   _nopayload/                   anything that should NOT be handed to an engine
 ```
+
+**Most themes need none of the three subdirectories.** A theme that sets
+colours, fonts and spacing writes `theme.conf` and one stylesheet, and that is
+the whole of it. The hooks are for a theme that has to know *what it is styling*
+— and they apply in that order of specificity:
+
+| hook | applies when | for |
+|---|---|---|
+| `templates/<id>/` | that markup is being rendered | rules about document structure — "the markup has an `<hgroup>`" |
+| `engines/<id>/` | that engine is running | a genuine per-engine quirk |
+| `stylers/<id>/` | that renderer paginates | page furniture, which differs between Paged.js and Vivliostyle |
+
+Each is keyed on what was actually *selected*: a `templates/` directory for a
+template this run is not using contributes nothing. Later hooks win, so a
+styler's rule beats a template's, and a child theme's beats its parent's within
+each hook.
 
 A stylesheet can be called anything, as long as `theme.conf` names it — see
 **Naming stylesheets** below. The shipped themes do exactly that, because a

@@ -164,7 +164,7 @@ stage_root() {
 # Bump it whenever the payload's layout or its generated files change shape.
 # Cheap: the worst case is one restage per theme, which is what an upgrade
 # already implies.
-STAGE_FORMAT=4
+STAGE_FORMAT=5
 
 stage_key() {  # stage_key <chain> <engine> <styler> [css]
 	{
@@ -212,9 +212,18 @@ stage_key() {  # stage_key <chain> <engine> <styler> [css]
 			# theme-engine.conf and theme-styler.conf are here because they may
 			# select a template; a theme changing which one it uses must get a
 			# new key even though none of its own files changed.
+			#
+			# templates/<id> is keyed on the SELECTED template, resolved just
+			# above -- a theme's styles for markup it is not being asked to
+			# render must not change the key, or every theme carrying more than
+			# one templates/ directory would restage whenever any of them
+			# changed.
+			_sk_taxis=""
+			[ -n "$_sk_tdir" ] && _sk_taxis="$_sk_dir/templates/$(basename -- "$_sk_tdir")"
 			for _sk_name in $STAGE_FILES $STAGE_CASCADE theme.conf \
-				theme-engine.conf theme-styler.conf; do
-				for _sk_where in "$_sk_dir/engines/$2" "$_sk_dir/stylers/$3" "$_sk_dir"; do
+				theme-engine.conf theme-styler.conf theme-template.conf; do
+				for _sk_where in "$_sk_dir/engines/$2" "$_sk_dir/stylers/$3" \
+					$_sk_taxis "$_sk_dir"; do
 					if [ -f "$_sk_where/$_sk_name" ]; then
 						printf '%s %s\n' "$_sk_where/$_sk_name" \
 							"$(conf_hash_file "$_sk_where/$_sk_name")"
@@ -332,10 +341,19 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 	#
 	# Same axis order as the styling cascade: theme, then styler, then engine,
 	# each more specific than the last.
+	# Same axis order as the styling cascade, so a font bound at a specific
+	# hook resolves the way its stylesheet does.
+	_sb_tdir=$(template_select "$_sb_chain" "$_sb_engine" "$_sb_styler" \
+		"${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$_sb_engine" 2>/dev/null) \
+		|| _sb_tdir=""
+	_sb_taxis=""
+	[ -n "$_sb_tdir" ] && _sb_taxis="templates/$(basename -- "$_sb_tdir")"
+
 	_sb_confs=""
 	for _sb_dir in $(printf '%s\n' "$_sb_chain"); do
 		[ -n "$_sb_dir" ] || continue
 		for _sb_where in "$_sb_dir/theme.conf" \
+			${_sb_taxis:+"$_sb_dir/$_sb_taxis/theme-template.conf"} \
 			"$_sb_dir/stylers/$_sb_styler/theme-styler.conf" \
 			"$_sb_dir/engines/$_sb_engine/theme-engine.conf"; do
 			if [ -f "$_sb_where" ]; then
@@ -1006,8 +1024,13 @@ stage_mirror_all() {  # stage_mirror_all <chain> <engine> <styler> <out>
 	# template the payload is for.
 	_sma_tmpl=$(template_select "$_sma_chain" "$_sma_engine" "$_sma_styler" \
 		"$_sma_enginedir") || return 1
+	# The templates/ axis is keyed on the SELECTED template's id, so a theme
+	# may carry theme-template.conf for several templates and only the one in
+	# play is mirrored -- the same rule as engines/ and stylers/.
+	_sma_taxis=""
 	if [ -n "$_sma_tmpl" ]; then
 		stage_mirror_object "$_sma_tmpl" "$_sma_out" || return 1
+		_sma_taxis="templates/$(basename -- "$_sma_tmpl")"
 	fi
 
 	# Every theme in the chain, with its selected axes. A theme that
@@ -1021,7 +1044,7 @@ stage_mirror_all() {  # stage_mirror_all <chain> <engine> <styler> <out>
 	printf '%s\n' "$_sma_chain" | while IFS= read -r _sma_dir || [ -n "$_sma_dir" ]; do
 		[ -n "$_sma_dir" ] || continue
 		stage_mirror_object "$_sma_dir" "$_sma_out" || exit 1
-		for _sma_axis in "engines/$_sma_engine" "stylers/$_sma_styler"; do
+		for _sma_axis in $_sma_taxis "engines/$_sma_engine" "stylers/$_sma_styler"; do
 			[ -d "$_sma_dir/$_sma_axis" ] || continue
 			stage_mirror_object "$_sma_dir/$_sma_axis" "$_sma_out" || exit 1
 		done
@@ -1116,11 +1139,18 @@ stage_payload_css() {  # stage_payload_css <chain> <engine> <styler> <out>
 	# Every level that can declare, with the conf it declares in and the band
 	# it belongs to. Same axes and same numbers as STYLING_LEVELS, because a
 	# generated sheet is an ordinary member of its band.
+	_sp_tdir=$(template_select "$_sp_chain" "$_sp_engine" "$_sp_styler" \
+		"${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$_sp_engine" 2>/dev/null) \
+		|| _sp_tdir=""
+	_sp_tid=""
+	[ -n "$_sp_tdir" ] && _sp_tid=$(basename -- "$_sp_tdir")
+
 	_sp_n=0
 	for _sp_dir in $(printf '%s\n' "$_sp_chain"); do
 		[ -n "$_sp_dir" ] || continue
 		for _sp_spec in \
 			"20:$_sp_dir:theme.conf" \
+			${_sp_tid:+"25:$_sp_dir/templates/$_sp_tid:theme-template.conf"} \
 			"30:$_sp_dir/engines/$_sp_engine:theme-engine.conf" \
 			"40:$_sp_dir/stylers/$_sp_styler:theme-styler.conf"; do
 

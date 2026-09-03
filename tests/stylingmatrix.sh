@@ -182,6 +182,53 @@ printf 'stylesheet = +./eng.css\n' \
 ok "theme-engine.conf declares into the engine band" "30" \
 	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep 'eng.css' | cut -d: -f1)"
 
+# The templates/ axis (PAYLOAD-PLAN §6). Keyed on the SELECTED template, so a
+# theme may carry theme-template.conf for several and only the one in play
+# contributes -- the same rule as engines/ and stylers/.
+setup
+printf 'styler=S\ntemplate=T\n' > "$BASE/engines/E/engine.conf"
+printf 'markup = ./a.tmpl\n' > "$BASE/templates/T/template.conf"
+echo 'TMPL' > "$BASE/templates/T/a.tmpl"
+mkdir -p "$BASE/themes/leaf/templates/T"
+echo '/* tmpl-axis */' > "$BASE/themes/leaf/templates/T/x.css"
+printf 'stylesheet = +./x.css\n' \
+	> "$BASE/themes/leaf/templates/T/theme-template.conf"
+ok "theme-template.conf declares into the template band" "25" \
+	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep 'x.css' | cut -d: -f1)"
+
+# BETWEEN theme and theme-engine: the markup is what you are styling, engine
+# quirks are narrower than the markup they apply to, and the styler paginates
+# and gets the last word. Getting this order wrong is invisible until a theme
+# declares at two hooks at once.
+setup
+printf 'styler=S\ntemplate=T\n' > "$BASE/engines/E/engine.conf"
+printf 'markup = ./a.tmpl\n' > "$BASE/templates/T/template.conf"
+echo 'TMPL' > "$BASE/templates/T/a.tmpl"
+mkdir -p "$BASE/themes/leaf/templates/T"
+echo '/* tmpl-axis */' > "$BASE/themes/leaf/templates/T/x.css"
+printf 'stylesheet = +./x.css\n' \
+	> "$BASE/themes/leaf/templates/T/theme-template.conf"
+echo '/* eng */' > "$BASE/themes/leaf/engines/E/eng.css"
+printf 'stylesheet = +./eng.css\n' \
+	> "$BASE/themes/leaf/engines/E/theme-engine.conf"
+ok "templates comes after theme and before engines" \
+	"20:themes/leaf/print.css 25:themes/leaf/templates/T/x.css 30:themes/leaf/engines/E/eng.css" \
+	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep -E 'leaf/(print|templates|engines)' | tr '\n' ' ' | sed 's/ *$//')"
+
+# A theme-template for a template that is NOT selected contributes nothing.
+# Without this the axis would be "styles for any markup", which is what the
+# plain theme.conf sheet already is.
+setup
+printf 'styler=S\ntemplate=T\n' > "$BASE/engines/E/engine.conf"
+printf 'markup = ./a.tmpl\n' > "$BASE/templates/T/template.conf"
+echo 'TMPL' > "$BASE/templates/T/a.tmpl"
+mkdir -p "$BASE/themes/leaf/templates/OTHER"
+echo '/* other */' > "$BASE/themes/leaf/templates/OTHER/o.css"
+printf 'stylesheet = +./o.css\n' \
+	> "$BASE/themes/leaf/templates/OTHER/theme-template.conf"
+ok "an unselected template's axis is ignored" "" \
+	"$(listing "$CHAIN" E S | tr ' ' '\n' | grep 'o.css' | cut -d: -f1)"
+
 
 section "STAGING"
 

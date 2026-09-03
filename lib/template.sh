@@ -102,6 +102,13 @@ template_resolve() {  # template_resolve <ref> <base-dir>
 #   <engine-dir>/engine.conf                     template =
 #   (nothing -- the engine falls back to its own built-in)
 #
+# `<theme>/templates/<id>/theme-template.conf` is DELIBERATELY NOT IN THIS
+# LIST, and cannot be: that axis is keyed on the template this function
+# selects, so letting it select one would be circular -- the answer would
+# decide which directory was consulted to produce it. A theme-template.conf
+# says "when this markup is in play, style it thus"; choosing the markup is a
+# different question, asked at one of the hooks above.
+#
 # The theme chain is walked child-first, so the most derived theme that names a
 # template wins, which is how every other theme key already behaves.
 #

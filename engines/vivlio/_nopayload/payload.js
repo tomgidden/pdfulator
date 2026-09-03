@@ -304,7 +304,7 @@ export function markup(payload) {
 // mean "mine, and nothing inherited".
 function sheetsOf(dir) {
   const conf = ['template.conf', 'theme.conf', 'theme-engine.conf',
-                'theme-styler.conf', 'engine.conf']
+                'theme-styler.conf', 'theme-template.conf', 'engine.conf']
     .map(n => path.join(dir, n))
     .find(p => fs.existsSync(p));
   if (!conf) return [];
@@ -382,8 +382,9 @@ export function features(payload) {
 //     engine
 //     template
 //     grandparent theme,        parent theme,        theme
-//     grandparent theme-engine, parent theme-engine, theme-engine
-//     grandparent theme-styler, parent theme-styler, theme-styler
+//     grandparent theme-template, parent theme-template, theme-template
+//     grandparent theme-engine,   parent theme-engine,   theme-engine
+//     grandparent theme-styler,   parent theme-styler,   theme-styler
 //
 // NOT chain-outer. Tom's rationale, which generalises to any axis added later:
 // an object's stylesheet is really its parent's with changes, so the
@@ -421,6 +422,7 @@ export function features(payload) {
 //        5   engine.conf's stylesheet        sheetsOf(engineDir)
 //       10   template.conf's stylesheet      sheetsOf(tdir)
 //       20   styling_axis "" theme.conf            sub === ''
+//       25   styling_axis templates/<id>           sub === `templates/<id>`
 //       30   styling_axis engines/<id>             sub === `engines/<id>`
 //       40   styling_axis stylers/<s>              sub === `stylers/<s>`
 //       50   (neither: the document -- see below)
@@ -453,11 +455,21 @@ export function stylesheets(payload, engineId, styler) {
   const tdir = templateDir(payload);
   if (tdir) out.push(...sheetsOf(tdir));
 
-  // Levels 20/30/40: one pass per axis, each pass walking the whole chain
+  // Levels 20/25/30/40: one pass per axis, each pass walking the whole chain
   // root-first. AXIS OUTER, CHAIN INNER -- this loop nesting IS the rule, and
   // transposing the two `for`s silently produces the rejected order.
-  // styling_list: the three consecutive styling_axis calls.
-  for (const sub of ['', `engines/${engineId}`, `stylers/${styler}`]) {
+  // styling_list: the four consecutive styling_axis calls.
+  //
+  // templates/ (25) comes before engines/ and stylers/ (§6): the markup is
+  // what you are styling, an engine's quirks are narrower than the markup they
+  // apply to, and the styler paginates and so gets the last word. It is keyed
+  // on the SELECTED template, the same one templateDir() found for level 10 --
+  // a theme styling `templates/html-mustache-vivlio/` means "when this markup
+  // is in play", which is only meaningful against the template in use.
+  const templateAxis = tdir ? `templates/${path.basename(tdir)}` : null;
+  const axes = ['', ...(templateAxis ? [templateAxis] : []),
+                `engines/${engineId}`, `stylers/${styler}`];
+  for (const sub of axes) {
     for (const themeDir of chain) {
       const dir = sub ? path.join(themeDir, sub) : themeDir;
       if (isDir(dir)) out.push(...sheetsOf(dir));
