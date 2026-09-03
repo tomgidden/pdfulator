@@ -317,6 +317,25 @@ function sheetsOf(dir) {
     if (isAdd(value)) out.push(file);
     else out = [file];
   }
+
+  // The sheet pdfulator GENERATED for this level, if it wrote one: the CSS
+  // rendering of that object's declarative keys (logo.* today, page size and
+  // running heads later). It is not declared anywhere -- nothing in a conf
+  // names it -- so it is picked up by its agreed name instead, which is what
+  // the `_` prefix is for: it marks the one file here that pdfulator wrote
+  // rather than the author.
+  //
+  // AFTER the declared sheets and after a bare-value replacement, so a theme's
+  // own stylesheet can override the rule generated for it. That is the way
+  // round an author expects, and it matches the shell: stage_styling appends
+  // the generated sheets and stable-sorts on the level column only, which
+  // leaves them last within their band.
+  //
+  // sh: stage_styling, which merges stage_payload_css's (level, file) tuples
+  //     into styling_list's output and sorts with `sort -k1,1n -s`.
+  const generated = path.join(dir, '_payload.css');
+  if (fs.existsSync(generated)) out.push(generated);
+
   return out;
 }
 

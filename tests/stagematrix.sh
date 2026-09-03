@@ -312,7 +312,7 @@ echo "============ PAYLOAD FORMAT ============"
 # the embed-url in every generated fop-fonts.xconf, and a payload cached from
 # before the rename made FOP fail to load a single font -- a stack trace
 # mentioning neither caching nor the upgrade that caused it.
-fixture
+setup
 _chain=$(theme_chain "$BASE/themes/derived")
 _k_before=$(stage_key "$_chain" vivlio vivliostyle)
 
@@ -327,6 +327,73 @@ ok "bumping the payload format changes the key" "no" \
 # And the same format gives the same key, or every run would restage.
 ok "the same format gives the same key" "yes" \
    "$([ "$_k_before" = "$(stage_key "$_chain" vivlio vivliostyle)" ] && echo yes || echo no)"
+
+
+echo "============ GENERATED _payload FILES ============"
+# PAYLOAD-PLAN §8: a level that declares logo.* generates `_payload.css` and
+# `_payload.params` AT THAT LEVEL, joining the cascade in that level's band.
+#
+# This replaced one flattened logo.css + logo-params at the payload root. Two
+# things were wrong with the flattened version. The CSS sat outside every band,
+# so engines/vivlio had to splice it in by hand. And the FOP side read a
+# separate root file that could disagree with the CSS about what won -- which
+# is not hypothetical: with a logo declared, pandoc-xslt produced a PDF
+# byte-identical to one with no logo at all. Nothing here tested it.
+setup
+printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>\n' \
+	> "$BASE/themes/derived/logo.svg"
+cat >> "$BASE/themes/derived/theme.conf" <<'EOF'
+logo.file     = logo.svg
+logo.position = top right
+logo.height   = 18pt
+EOF
+ds=$(stage_dir "$BASE/themes/derived" vivlio vivliostyle); _rc=$?
+ds=$(stage_dir "$BASE/themes/derived" vivlio vivliostyle) || ds=""
+
+ok "a declaring level generates a stylesheet" "yes" \
+	"$([ -f "$ds/input/themes/derived/_payload.css" ] && echo yes || echo no)"
+ok "and the params beside it" "yes" \
+	"$([ -f "$ds/input/themes/derived/_payload.params" ] && echo yes || echo no)"
+
+# BESIDE the image, which is what makes the generated url() resolve. Landing it
+# anywhere else -- as a loose file under input/external/, which an earlier
+# version did -- leaves the rule pointing at nothing.
+ok "the image is in the same directory" "yes" \
+	"$([ -f "$ds/input/themes/derived/logo.svg" ] && echo yes || echo no)"
+ok "so the rule uses a plain relative url" "yes" \
+	"$(grep -q 'url(logo.svg)' "$ds/input/themes/derived/_payload.css" \
+	   && echo yes || echo no)"
+
+# NOTHING at the payload root any more.
+ok "no flattened logo.css at the root" "no" \
+	"$([ -f "$ds/logo.css" ] && echo yes || echo no)"
+ok "nor a flattened logo-params" "no" \
+	"$([ -f "$ds/logo-params" ] && echo yes || echo no)"
+
+# It joins the cascade rather than being appended: the manifest records it as
+# an ordinary styling row at its own level.
+ok "it is a styling row at the theme level" "20" \
+	"$(awk -F'\t' '$4 ~ /_payload\.css$/ {print $2}' "$ds/manifest")"
+
+# A level that declares NOTHING generates nothing -- the ordinary case, and the
+# reason most objects need no logo rule at all.
+ok "a level declaring nothing generates nothing" "no" \
+	"$([ -f "$ds/input/themes/base/_payload.css" ] && echo yes || echo no)"
+
+# The two sides agree, which is the point of moving both together. The params
+# name the same file the CSS does.
+ok "the params name the same image" "logo.svg" \
+	"$(awk -F'\t' '$1 == "file" {print $2}' "$ds/input/themes/derived/_payload.params")"
+ok "and the same position, normalised" "top-right" \
+	"$(awk -F'\t' '$1 == "position" {print $2}' "$ds/input/themes/derived/_payload.params")"
+
+# The generated sheet sorts AFTER its band's hand-written ones, so a theme's
+# own stylesheet can override the rule pdfulator generated for it.
+ds2=$ds
+ok "a theme's own sheet comes before the generated one" "yes" \
+	"$(awk -F'\t' '$1 == "styling" && $4 ~ /themes\/derived/ {print $4}' "$ds2/manifest" |
+	   tr '\n' ' ' |
+	   grep -q 'print.css.*_payload.css' && echo yes || echo no)"
 
 
 printf '\n'
