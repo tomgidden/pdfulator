@@ -168,20 +168,57 @@ fi
 # a header template that switches on position, so a theme's declared logo needs
 # no XSL of its own -- which is the point of declaring it rather than making
 # every theme ship a stylesheet.
-if [ -f "$payload/logo-params" ]; then
-	while IFS="$(printf '\t')" read -r _key _val || [ -n "$_key" ]; do
-		[ -n "$_key" ] && [ -n "$_val" ] || continue
-		case $_key in
-			file)
-				# Absolute, because FOP resolves a relative path against
-				# <base> rather than against the payload.
-				set -- "$@" --stringparam header.image.filename "$payload/$_val"
-				;;
-			position)
-				set -- "$@" --stringparam header.image.position "$_val"
-				;;
+#
+# PER LEVEL, IN CASCADE ORDER (PAYLOAD-PLAN §8). There used to be one flattened
+# `logo-params` at the payload root; now each object that declared anything has
+# a `_payload.params` beside its own conf, and the manifest lists the matching
+# `_payload.css` files in the order the cascade resolved. Reading them in that
+# order and letting later keys overwrite earlier ones gives the FOP side the
+# same answer the CSS side gets -- which is the whole point of moving both
+# together. A flattened root file here would have drifted from the per-level
+# CSS exactly as defaults/ drifted from the pandoc engine.
+#
+# The manifest is the ordering, not a directory walk: it is what the wrapper
+# already computed, and re-deriving it here would be a second implementation of
+# the cascade for no reason.
+_logo_file=""
+_logo_pos=""
+if [ -f "$payload/manifest" ]; then
+	while IFS="$(printf '\t')" read -r _kind _lvl _lname _path || [ -n "$_kind" ]; do
+		[ "$_kind" = styling ] || continue
+		case $_path in
+			*/_payload.css) ;;
+			*) continue ;;
 		esac
-	done < "$payload/logo-params"
+		_params="$payload/${_path%.css}.params"
+		[ -f "$_params" ] || continue
+
+		# Relative to the params file, which sits beside the image in the same
+		# mirrored directory -- the same reason the generated CSS can use a
+		# plain url().
+		_pdir=$(dirname -- "$_params")
+		while IFS="$(printf '\t')" read -r _key _val || [ -n "$_key" ]; do
+			[ -n "$_key" ] && [ -n "$_val" ] || continue
+			case $_key in
+				file)     _logo_file="$_pdir/$_val" ;;
+				position) _logo_pos=$_val ;;
+			esac
+		done < "$_params"
+	done < "$payload/manifest"
+fi
+
+# Absolute, because FOP resolves a relative path against <base> rather than
+# against the payload.
+#
+# `if`, not `[ ... ] && ...`: under `set -e` a bare test that fails is a failing
+# command, and the last one in a script exits it silently. Three bugs in
+# lib/browser.sh were exactly this shape (daf9507), and a theme with no logo is
+# the common case, so this test fails on nearly every run.
+if [ -n "$_logo_file" ]; then
+	set -- "$@" --stringparam header.image.filename "$_logo_file"
+fi
+if [ -n "$_logo_pos" ]; then
+	set -- "$@" --stringparam header.image.position "$_logo_pos"
 fi
 
 xsltproc --xinclude --nonet \

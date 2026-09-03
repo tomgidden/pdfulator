@@ -213,15 +213,18 @@ function linkTags(payload) {
   const { id, styler } = engineOf(payload);
   const sheets = stylesheets(payload, id, styler);
 
-  // Generated at the payload root from theme.conf's logo.* keys. It belongs
-  // after the themes that declared it -- but BEFORE --css, which is the user's
-  // last word and must be able to override a theme's logo rule like anything
-  // else. So it is spliced in ahead of the external band rather than appended.
+  // NO SPECIAL CASE FOR THE GENERATED SHEET ANY MORE.
+  //
+  // There used to be one: logo.css was written to the payload ROOT, outside
+  // every band, so this had to splice it in by hand -- after the themes that
+  // declared it, but before --css, which is the user's last word. Generating
+  // it per level (PAYLOAD-PLAN §8) means it arrives from stylesheets() in its
+  // own band like anything else, and the ordering falls out of the cascade
+  // rather than being decided here.
   const external = sheets.filter(isExternal);
   const declared = sheets.filter(s => !isExternal(s));
 
   for (const sheet of declared) out.push(link(href(sheet)));
-  if (fs.existsSync(path.join(payload, 'logo.css'))) out.push(link('/payload/logo.css'));
   for (const sheet of external) out.push(link(href(sheet)));
 
   return out.join('\n');

@@ -164,7 +164,7 @@ stage_root() {
 # Bump it whenever the payload's layout or its generated files change shape.
 # Cheap: the worst case is one restage per theme, which is what an upgrade
 # already implies.
-STAGE_FORMAT=3
+STAGE_FORMAT=4
 
 stage_key() {  # stage_key <chain> <engine> <styler> [css]
 	{
@@ -286,12 +286,25 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 	stage_mirror_all "$_sb_chain" "$_sb_engine" "$_sb_styler" "$_sb_out" \
 		|| return 1
 
+	# --- Generated per-level stylesheets ---------------------------------------
+	#
+	# BEFORE the cascade, because they join it: a level's _payload.css is an
+	# ordinary member of that level's band, so it has to exist before
+	# styling_list is asked what the band contains. They are generated into a
+	# payload's mirror rather than into the user's theme -- staging must never
+	# write to the source tree -- landing beside the conf that produced them,
+	# which is what makes a relative url() in a generated rule resolve.
+	_sb_genlist="$_sb_out/.generated.list"
+	stage_payload_css "$_sb_chain" "$_sb_engine" "$_sb_styler" "$_sb_out" \
+		> "$_sb_genlist" || { rm -f "$_sb_genlist"; return 1; }
+
 	# --- The styling cascade -------------------------------------------------
 	#
 	# print.css and its manifest. --css arrives here as the highest level
 	# rather than as a special case appended afterwards.
 	stage_styling "$_sb_chain" "$_sb_engine" "$_sb_styler" "$_sb_out" \
-		"$_sb_css" || return 1
+		"$_sb_css" "$_sb_genlist" || return 1
+	rm -f "$_sb_genlist"
 
 	# --- Single files: most specific wins ---------------------------------------
 	for _sb_name in $STAGE_FILES; do
@@ -348,11 +361,7 @@ stage_build() {  # stage_build <chain> <engine> <styler> <out> <font-base> [css]
 	fonts_css "$_sb_merged" "$_sb_out/fonts" "$_sb_out/fonts.css" || return 1
 	fonts_fo_params "$_sb_merged" "$_sb_out/fonts" "$_sb_out/fo-params" || return 1
 
-	# The logo, if the theme has one. Declared in theme.conf or simply present
-	# as logo.svg; either way the rule that places it is generated here, so a
-	# theme wanting a logo on every page is a theme.conf and an image rather
-	# than a stylesheet someone had to write.
-	stage_logo "$_sb_chain" "$_sb_out" || return 1
+
 
 	# FOP config only where it means something. A vivlio theme with a stray
 	# fop-fonts.xconf in it is harmless but misleading.
@@ -562,18 +571,34 @@ stage_manifest_add() {  # stage_manifest_add <dir> <kind> <level> <name> <path>
 # Everything is COPIED in, never referenced. A staged directory has to be
 # self-contained -- a container sees it through a mount and a remote engine
 # receives it over a wire, and neither can open a path into the user's home.
-stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
+stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css] [generated]
 	_sy_chain=$1
 	_sy_engine=$2
 	_sy_styler=$3
 	_sy_out=$4
 	_sy_css=${5:-}
+	_sy_gen=${6:-}
 
 	_sy_enginedir="${ENGINES_DIR:-$PDFULATOR_DIR/engines}/$_sy_engine"
 
 	_sy_list="$_sy_out/.styling.list"
 	styling_list "$_sy_chain" "$_sy_engine" "$_sy_styler" "$_sy_enginedir" \
 		"$_sy_css" > "$_sy_list" || { rm -f "$_sy_list"; return 1; }
+
+	# The generated sheets join their own bands rather than being appended.
+	#
+	# A stable sort on the level column only: within a band the existing order
+	# is root-first and must survive, and `sort -k1,1n` keeps equal keys in
+	# input order. The generated sheet goes AFTER its band's hand-written ones
+	# -- appended before the sort -- so a theme's own stylesheet can override
+	# the rule pdfulator generated for it, which is the way round an author
+	# expects.
+	if [ -n "$_sy_gen" ] && [ -s "$_sy_gen" ]; then
+		cat "$_sy_gen" >> "$_sy_list" || { rm -f "$_sy_list"; return 1; }
+		sort -k1,1n -s "$_sy_list" > "$_sy_list.sorted" \
+			&& mv -- "$_sy_list.sorted" "$_sy_list" \
+			|| { rm -f "$_sy_list" "$_sy_list.sorted"; return 1; }
+	fi
 
 	mkdir -p -- "$_sy_out/input" || return 1
 	: > "$_sy_out/print.css" || return 1
@@ -583,6 +608,27 @@ stage_styling() {  # stage_styling <chain> <engine> <styler> <staged-dir> [css]
 	while IFS="$(printf '\t')" read -r _sy_level _sy_file || [ -n "$_sy_level" ]; do
 		[ -n "$_sy_file" ] || continue
 		[ -f "$_sy_file" ] || continue
+
+		# A GENERATED sheet is already inside the payload, in the mirrored
+		# directory it belongs to. Running it through stage_mirror_alloc would
+		# ask "where should this source directory be mirrored?" about a path
+		# that is itself a mirror -- and since the payload is built under
+		# `<key>.building.<pid>`, that string does not match the source theme
+		# already in .mirror.map, so it allocates a SECOND directory
+		# (themes/classic-pdfulator-2) and the sheet lands away from the image
+		# its url() refers to.
+		case $_sy_file in
+			"$_sy_out"/*)
+				_sy_dest=${_sy_file#"$_sy_out"/}
+				_sy_n=$((_sy_n + 1))
+				stage_manifest_add "$_sy_out" styling "$_sy_level" \
+					"$(styling_level_name "$_sy_level")" "$_sy_dest" || return 1
+				printf '/* --- %s --- */\n' "$_sy_dest" >> "$_sy_out/print.css"
+				cat -- "$_sy_file" >> "$_sy_out/print.css" || return 1
+				printf '\n' >> "$_sy_out/print.css"
+				continue
+				;;
+		esac
 
 		_sy_src=$(dirname -- "$_sy_file")
 
@@ -1029,95 +1075,185 @@ stage_lib() {  # stage_lib <staged-dir>
 }
 
 
-# Place the theme's logo, if it has one.
+# Generate `_payload.css` and `_payload.params` at each level that declares
+# something, and return the generated stylesheets as (level, file) tuples.
 #
-#   stage_logo <chain> <staged-dir>
+#   stage_payload_css <chain> <engine> <styler> <staged-dir>
 #
-# Writes logo.css into the staged directory, and records the file and position
-# in `logo-params` for the engines that cannot read CSS.
+# WHAT CHANGED, AND WHY IT MATTERS (PAYLOAD-PLAN §8)
 #
-# The generated rule is deliberately modest: it puts the image in a margin box
-# at a sensible size and leaves everything else alone. A theme wanting more
-# control writes its own @page rule as before -- this exists so that the common
-# case, "our documents have our logo in the corner", needs no CSS at all.
-stage_logo() {  # stage_logo <chain> <staged-dir>
-	_sl_chain=$1
-	_sl_out=$2
+# This used to be stage_logo: it flattened the whole chain into ONE logo.css
+# and ONE logo-params at the payload ROOT, taking the most specific value of
+# each key. Two things were wrong with that.
+#
+# The generated CSS sat OUTSIDE the cascade. engines/vivlio had to splice it in
+# by hand -- "after the declared sheets, before --css" -- because there was no
+# band for it to belong to. That splice is gone now: a level's _payload.css
+# joins that level's band like any other stylesheet, so a theme-styler's
+# generated rule beats its parent theme's for the same reason its hand-written
+# one does, with nothing anywhere deciding the order specially.
+#
+# And flattening lost the level. `logo.position` set by a parent and
+# `logo.height` set by a child produced one rule with no record of where either
+# came from, so a child could not override only part of what its parent
+# declared -- and the FOP side, reading a separate flattened file, could
+# disagree with the CSS side about what won. Per level, each object generates
+# from ITS OWN declarations and the cascade resolves the rest.
+#
+# `_` marks what pdfulator wrote rather than what an author did, so it sorts
+# apart from a theme's own files and cannot collide with one.
+#
+# The params file is written beside the CSS at the same level, NOT flattened to
+# the root. §8 is explicit about this: otherwise the CSS side gets per-level
+# resolution while the FOP side keeps a root file, and the two drift exactly as
+# defaults/ and the pandoc engine did.
+stage_payload_css() {  # stage_payload_css <chain> <engine> <styler> <out>
+	_sp_chain=$1
+	_sp_engine=$2
+	_sp_styler=$3
+	_sp_out=$4
 
-	# theme.conf is read from the most specific theme in the chain that sets
-	# each key, so a child can add a logo to a parent that has none, or move
-	# one the parent placed.
-	_sl_decl=""
-	_sl_pos=""
-	_sl_h=""
-	_sl_m=""
-	printf '%s\n' "$_sl_chain" | sed '1!G;h;$!d' > "$_sl_out/.chain"
-	while IFS= read -r _sl_dir || [ -n "$_sl_dir" ]; do
-		[ -n "$_sl_dir" ] || continue
-		[ -f "$_sl_dir/theme.conf" ] || continue
-		if [ -z "$_sl_decl" ]; then
-			_sl_decl=$(conf_get "$_sl_dir/theme.conf" logo.file)
-		fi
-		if [ -z "$_sl_pos" ]; then
-			_sl_pos=$(conf_get "$_sl_dir/theme.conf" logo.position)
-		fi
-		if [ -z "$_sl_h" ]; then
-			_sl_h=$(conf_get "$_sl_dir/theme.conf" logo.height)
-		fi
-		if [ -z "$_sl_m" ]; then
-			_sl_m=$(conf_get "$_sl_dir/theme.conf" logo.margin)
-		fi
-	done < "$_sl_out/.chain"
-	rm -f "$_sl_out/.chain"
+	# Every level that can declare, with the conf it declares in and the band
+	# it belongs to. Same axes and same numbers as STYLING_LEVELS, because a
+	# generated sheet is an ordinary member of its band.
+	_sp_n=0
+	for _sp_dir in $(printf '%s\n' "$_sp_chain"); do
+		[ -n "$_sp_dir" ] || continue
+		for _sp_spec in \
+			"20:$_sp_dir:theme.conf" \
+			"30:$_sp_dir/engines/$_sp_engine:theme-engine.conf" \
+			"40:$_sp_dir/stylers/$_sp_styler:theme-styler.conf"; do
 
-	_sl_file=$(theme_logo_file "$_sl_out" "$_sl_decl") || return 1
-	if [ -z "$_sl_file" ]; then
-		# No logo is the ordinary case, and not an error. An empty stylesheet
-		# is still written, so the template can link it unconditionally.
-		printf '/* No logo in this theme. */\n' > "$_sl_out/logo.css"
-		: > "$_sl_out/logo-params"
+			_sp_level=${_sp_spec%%:*}
+			_sp_rest=${_sp_spec#*:}
+			_sp_where=${_sp_rest%:*}
+			_sp_conf=${_sp_rest##*:}
+
+			[ -f "$_sp_where/$_sp_conf" ] || continue
+
+			_sp_n=$((_sp_n + 1))
+			stage_payload_one "$_sp_where" "$_sp_conf" "$_sp_out" \
+				"$_sp_level" || return 1
+		done
+	done
+
+	return 0
+}
+
+
+# One level's generated files, if it declares anything.
+#
+#   stage_payload_one <source-dir> <conf> <staged-dir> <level>
+#
+# Prints `<level><TAB><file>` for the generated stylesheet, or nothing when
+# this level declares none of the keys.
+stage_payload_one() {  # stage_payload_one <src> <conf> <out> <level>
+	_sq_where=$1
+	_sq_conf=$2
+	_sq_out=$3
+	_sq_level=$4
+
+	_sq_decl=$(conf_get "$_sq_where/$_sq_conf" logo.file)
+	_sq_pos=$(conf_get "$_sq_where/$_sq_conf" logo.position)
+	_sq_h=$(conf_get "$_sq_where/$_sq_conf" logo.height)
+	_sq_m=$(conf_get "$_sq_where/$_sq_conf" logo.margin)
+
+	# Nothing declared at this level is the ordinary case: most objects say
+	# nothing about a logo, and the cascade means they do not have to.
+	if [ -z "$_sq_decl" ] && [ -z "$_sq_pos" ] && \
+	   [ -z "$_sq_h" ] && [ -z "$_sq_m" ]; then
 		return 0
 	fi
 
-	_sl_box=$(theme_logo_position "$_sl_pos") || return 1
+	# NO FOUND-AUTOMATICALLY MAGIC (§8). The file is named or there is none:
+	# `logo.file` stays because a logo.png should not be ignored by a rule that
+	# only looked for .svg, but dropping the search makes the key simply "which
+	# image", which is clearer than both. A level declaring position or height
+	# without a file is declaring a placement for whatever its parent named.
+	if [ -n "$_sq_decl" ]; then
+		if [ ! -f "$_sq_where/$_sq_decl" ]; then
+			stage_error "the theme names a logo it does not have: $_sq_decl"
+			return 1
+		fi
+	fi
 
-	# Defaults chosen to look right rather than to be round numbers: 18pt is
-	# about the height of two lines of body text, which is as large as a logo
-	# can be in a margin before it competes with the page.
-	_sl_height=${_sl_h:-18pt}
-	_sl_margin=${_sl_m:-9pt}
+	# STRAIGHT INTO THE MIRROR, not into a scratch directory.
+	#
+	# A generated sheet must land in the same mirrored directory as the conf
+	# that produced it, because that is what makes a plain relative url()
+	# correct -- exactly as it is for a theme's own stylesheet saying
+	# url(logo.svg). Staging it as a loose file elsewhere put it under
+	# input/external/, where the image is not, and the rule silently referred
+	# to nothing.
+	#
+	# stage_mirror_alloc is shared with stage_mirror_object so this lands
+	# INSIDE the object's existing copy rather than in a second one beside it.
+	_sq_mrel=$(stage_mirror_alloc "$_sq_where" "$_sq_out") || return 1
+	_sq_dir="$_sq_out/input/$_sq_mrel"
+	mkdir -p -- "$_sq_dir" || return 1
+
+	# The image is named relative to the conf that declared it, and both land
+	# in the same mirrored directory, so the reference needs no rewriting.
+	_sq_rel=""
+	[ -n "$_sq_decl" ] && _sq_rel=$_sq_decl
 
 	{
-		printf '/* Generated by pdfulator from theme.conf. Do not edit. */\n\n'
-		printf '@page {\n'
-		printf '  @%s {\n' "$_sl_box"
-		# `content` must be set for the box to exist at all, even though the
-		# image arrives via background-image -- the quirk the README has
-		# warned about since v1.
-		printf '    content: "";\n'
-		# The box is the height of the image plus its margin, so the margin is
-		# space *around* the logo rather than something that pushes it out of
-		# a fixed-size box and clips it -- which is what a hand-written rule
-		# with a tall box and a small image does, and why the shipped one
-		# needed nudging.
-		printf '    height: %s;\n' "$_sl_height"
-		printf '    margin-top: %s;\n' "$_sl_margin"
-		printf '    background-image: url(%s);\n' "$_sl_file"
-		printf '    background-repeat: no-repeat;\n'
-		printf '    background-size: contain;\n'
-		printf '    background-position: %s;\n' \
-			"$(printf '%s' "$_sl_box" | tr '-' ' ')"
-		printf '  }\n'
-		printf '}\n'
-	} > "$_sl_out/logo.css"
+		printf '/* Generated by pdfulator from %s. Do not edit. */\n\n' \
+			"$_sq_conf"
+		if [ -n "$_sq_rel" ] || [ -n "$_sq_pos" ] || \
+		   [ -n "$_sq_h" ] || [ -n "$_sq_m" ]; then
+			_sq_box=$(theme_logo_position "$_sq_pos") || return 1
+			printf '@page {\n'
+			printf '  @%s {\n' "$_sq_box"
+			# `content` must be set for the box to exist at all, even though
+			# the image arrives via background-image -- the quirk the README
+			# has warned about since v1.
+			printf '    content: "";\n'
+			# The box is the height of the image plus its margin, so the margin
+			# is space *around* the logo rather than something that pushes it
+			# out of a fixed-size box and clips it.
+			if [ -n "$_sq_h" ]; then
+				printf '    height: %s;\n' "$_sq_h"
+			fi
+			if [ -n "$_sq_m" ]; then
+				printf '    margin-top: %s;\n' "$_sq_m"
+			fi
+			if [ -n "$_sq_rel" ]; then
+				printf '    background-image: url(%s);\n' "$_sq_rel"
+				printf '    background-repeat: no-repeat;\n'
+				printf '    background-size: contain;\n'
+				printf '    background-position: %s;\n' \
+					"$(printf '%s' "$_sq_box" | tr '-' ' ')"
+			fi
+			printf '  }\n'
+			printf '}\n'
+		fi
+	} > "$_sq_dir/_payload.css" || return 1
 
-	# For engines that cannot read CSS. pandoc-xslt already has an
-	# fo:external-graphic and a header template keyed on position, so the same
-	# declaration drives it through --stringparam.
+	# For engines that cannot read CSS, beside the stylesheet at the same
+	# level. pandoc-xslt has an fo:external-graphic and a header template keyed
+	# on position, so the same declaration drives it through --stringparam.
+	# `if`, not `[ ... ] && ...`. The LAST test in this block decides the
+	# block's exit status, and `logo.margin` is the key a theme is least
+	# likely to set -- so on nearly every logo the group exited 1, the
+	# `|| return 1` fired, and staging failed with no message at all. Same
+	# shape as the three lib/browser.sh bugs (daf9507), and this file warns
+	# about it elsewhere; I wrote it anyway.
 	{
-		printf 'file\t%s\n' "$_sl_file"
-		printf 'position\t%s\n' "$_sl_box"
-	} > "$_sl_out/logo-params"
+		if [ -n "$_sq_rel" ]; then
+			printf 'file\t%s\n' "$_sq_rel"
+		fi
+		if [ -n "$_sq_pos" ]; then
+			printf 'position\t%s\n' "$(theme_logo_position "$_sq_pos")"
+		fi
+		if [ -n "$_sq_h" ]; then
+			printf 'height\t%s\n' "$_sq_h"
+		fi
+		if [ -n "$_sq_m" ]; then
+			printf 'margin\t%s\n' "$_sq_m"
+		fi
+	} > "$_sq_dir/_payload.params" || return 1
 
+	printf '%s\t%s\n' "$_sq_level" "$_sq_dir/_payload.css"
 	return 0
 }
