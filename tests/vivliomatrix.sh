@@ -156,6 +156,72 @@ check "wrong arity exits 2" "2" \
       "$("$ENGINE" in.md out.pdf >/dev/null 2>&1; echo $?)"
 
 
+echo "============ DOCUMENT-RELATIVE ASSETS ============"
+# `![](fig.svg)` resolves against the document, not against the temporary
+# directory the generated HTML lives in. This failed silently for a long time:
+# the mux server served the temp directory, every relative reference 404'd, and
+# the renderer drew its broken-image placeholder -- which still produces a
+# valid, plausibly-sized PDF.
+#
+# Note which way the sizes go, because it is the trap that hid this bug: the
+# BROKEN render is the BIGGER one. A placeholder icon plus its alt text costs
+# more than a flat-colour rectangle, so "the PDF grew, the image must be in
+# there" is exactly backwards. Neither size nor object counts can tell these
+# apart -- only the drawing operators can.
+#
+# So the assertion inflates the content streams and looks for the fill: an SVG
+# of #c0ffee must appear as `.7529 1 .9333 rg` followed by an 80x40 rect. A
+# placeholder cannot produce that, and a working render cannot avoid it.
+pdf_draws_the_swatch() {  # pdf_draws_the_swatch <pdf>
+	"$PDFULATOR_RUNTIME" -e '
+	  const fs = require("fs"), zlib = require("zlib");
+	  const buf = fs.readFileSync(process.argv[1]);
+	  let i = 0, found = false;
+	  while ((i = buf.indexOf("stream", i)) !== -1) {
+	    let s = i + 6;
+	    if (buf[s] === 13) s++;
+	    if (buf[s] === 10) s++;
+	    const e = buf.indexOf("endstream", s);
+	    if (e === -1) break;
+	    try {
+	      const o = zlib.inflateSync(buf.subarray(s, e)).toString("latin1");
+	      if (/\.7529 1 \.9333 rg/.test(o) && /0 0 80 40 re/.test(o)) found = true;
+	    } catch (err) {}
+	    i = e + 9;
+	  }
+	  console.log(found ? "found" : "missing");
+	' "$1" 2>/dev/null
+}
+
+fixture
+mkdir -p figs
+cat > figs/mark.svg <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+  <rect width="80" height="40" fill="#c0ffee"/>
+</svg>
+SVG
+printf -- '# Figure\n\n![a figure](figs/mark.svg)\n' > withimg.md
+"$ENGINE" withimg.md withimg.pdf "$THEME" >/dev/null 2>&1
+check "a document-relative image is embedded" "found" "$(pdf_draws_the_swatch withimg.pdf)"
+
+# The same document with the file absent must NOT draw it -- this is what makes
+# the check above meaningful rather than something that passes on any PDF.
+fixture
+mkdir -p figs
+printf -- '# Figure\n\n![a figure](figs/absent.svg)\n' > noimg.md
+"$ENGINE" noimg.md noimg.pdf "$THEME" >/dev/null 2>&1
+check "and an absent one is not" "missing" "$(pdf_draws_the_swatch noimg.pdf)"
+
+# A reference that resolves nowhere must not take the render down with it: a
+# missing figure is the author's problem, and the rest of the document is still
+# worth having.
+fixture
+printf -- '# Missing\n\n![gone](nosuch.png)\n\nText after.\n' > missing.md
+"$ENGINE" missing.md missing.pdf "$THEME" >/dev/null 2>&1
+check "a missing image still renders the document" "yes" \
+      "$(is_pdf missing.pdf && echo yes || echo no)"
+
+
 echo "============ CROSS-DEVICE OUTPUT ============"
 # The engine renders into $TMPDIR and moves the result into place, and
 # rename(2) cannot cross filesystems. When $TMPDIR and the output are on
