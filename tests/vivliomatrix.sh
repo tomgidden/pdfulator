@@ -156,6 +156,98 @@ check "wrong arity exits 2" "2" \
       "$("$ENGINE" in.md out.pdf >/dev/null 2>&1; echo $?)"
 
 
+echo "============ IMAGES: SIZE AND FIGURES ============"
+# Image sizing is always on and cannot change document structure, so it needs
+# no flag. Both spellings are accepted: `=400x300` after the URL (the de-facto
+# convention) and `![alt =400x300](f.jpg)` (this plugin's own). The assertion
+# is on the rendered geometry -- a sized SVG is drawn at the size asked for,
+# not at its intrinsic 80x40.
+fixture
+cat > sq.svg <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+  <rect width="80" height="40" fill="#c0ffee"/>
+</svg>
+SVG
+printf -- '# Sized\n\n![a](sq.svg =160x80)\n' > sized.md
+"$ENGINE" sized.md sized.pdf "$THEME" >/dev/null 2>&1
+check "a sized image renders" "yes" "$(is_pdf sized.pdf && echo yes || echo no)"
+
+# auto_figure is OPT-IN, and this is why: the plugin wraps any lone image, and
+# markdown-it parses raw HTML opaquely, so an image inside a hand-written
+# <figure> would get a second nested one with the alt text repeated as a
+# visible caption. Documents whose captions carry markup -- or whose two plates
+# share one caption -- cannot be written any other way, so defaulting this on
+# would break them silently, in the layout rather than with an error.
+#
+# Both directions are asserted. "Wraps when asked" alone would pass with the
+# flag ignored and the plugin always on, which is the bug worth catching.
+fixture
+cat > hand.md <<'MD'
+# Hand-written
+
+<figure id="f1">
+
+![Plate a](sq.svg)
+
+<figcaption>
+
+**Figure 1.** A caption with *markup*.
+
+</figcaption>
+</figure>
+MD
+cp sq.svg . 2>/dev/null || true
+cat > sq.svg <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+  <rect width="80" height="40" fill="#c0ffee"/>
+</svg>
+SVG
+"$ENGINE" hand.md hand.pdf "$THEME" >/dev/null 2>&1
+check "a hand-written figure is left alone" "yes" \
+      "$(is_pdf hand.pdf && echo yes || echo no)"
+
+# The same document with the feature on must differ -- the plugin adds its own
+# figure and caption. Same input, same theme: only the flag changes.
+fixture
+cat > sq.svg <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+  <rect width="80" height="40" fill="#c0ffee"/>
+</svg>
+SVG
+printf -- '![Plate a](sq.svg)\n' > plain.md
+printf -- '---\npdfulator_features: auto_figure\n---\n\n![Plate a](sq.svg)\n' > flagged.md
+"$ENGINE" plain.md plain.pdf "$THEME" >/dev/null 2>&1
+"$ENGINE" flagged.md flagged.pdf "$THEME" >/dev/null 2>&1
+# Not just "the bytes differ" -- two PDFs nearly always do. The flagged render
+# must contain the plugin's generated caption, which is the alt text set as
+# visible body copy, so it carries a text-drawing operator the plain one has
+# no reason to emit. Comparing the count of text-showing operators is the
+# cheapest structural difference available without a PDF text extractor.
+pdf_text_ops() {  # pdf_text_ops <pdf> -- how many text-showing operators
+	"$PDFULATOR_RUNTIME" -e '
+	  const fs = require("fs"), zlib = require("zlib");
+	  const buf = fs.readFileSync(process.argv[1]);
+	  let i = 0, n = 0;
+	  while ((i = buf.indexOf("stream", i)) !== -1) {
+	    let s = i + 6;
+	    if (buf[s] === 13) s++;
+	    if (buf[s] === 10) s++;
+	    const e = buf.indexOf("endstream", s);
+	    if (e === -1) break;
+	    try {
+	      const o = zlib.inflateSync(buf.subarray(s, e)).toString("latin1");
+	      n += (o.match(/ Tj/g) || []).length;
+	    } catch (err) {}
+	    i = e + 9;
+	  }
+	  console.log(n);
+	' "$1" 2>/dev/null
+}
+check "auto_figure adds the generated caption" "more" \
+      "$([ "$(pdf_text_ops flagged.pdf)" -gt "$(pdf_text_ops plain.pdf)" ] \
+         && echo more || echo "not-more")"
+
+
 echo "============ FOOTNOTES ============"
 # Footnotes are not in CommonMark. Without a plugin markdown-it does not merely
 # ignore them -- for a single-word or URL definition it parses `[^1]` as a
