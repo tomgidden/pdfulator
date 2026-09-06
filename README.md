@@ -586,6 +586,13 @@ These include:
 
 - `strong_href` -- embolden hyperlinks to make them stand out.
 
+- `auto_figure` - Wrap a lone image in a `<figure>`, using its alt text (or its
+  title, if given) as the caption. Off by default, because it wraps *every*
+  image that sits alone in a paragraph -- including one inside a `<figure>` you
+  wrote yourself, which would then get a second, nested figure and a repeated
+  caption. Documents whose captions carry markup, or whose two plates share one
+  caption, need the hand-written form and should leave this off.
+
 # TODO
 
 [X] _Themes_.

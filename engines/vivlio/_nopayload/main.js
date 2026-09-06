@@ -40,6 +40,9 @@ import MarkdownIt from 'markdown-it';
 import mdDeflist from 'markdown-it-deflist';
 import mdTaskLists from 'markdown-it-task-lists';
 import { footnote as mdFootnote } from '@mdit/plugin-footnote';
+import { figure as mdFigure } from '@mdit/plugin-figure';
+import { imgSize as mdImgSize, legacyImgSize as mdImgSizeLegacy }
+  from '@mdit/plugin-img-size';
 import yaml from 'js-yaml';
 import Mustache from 'mustache';
 import puppeteer from 'puppeteer-core';
@@ -87,16 +90,58 @@ const FALLBACK_TMPL = `<!DOCTYPE html>
 
 // Markdown → HTML
 
-// Footnotes are not in CommonMark, and their absence was not a quiet one.
-// markdown-it parses `Text[^1]` with `[^1]: note` below it as a shortcut
-// reference link -- so the document rendered with a link to a page named
-// "note", no warning and nothing literal to notice. A silently plausible wrong
-// document is worse than an unsupported construct, which is what made this
-// worth fixing before the features that merely don't work yet.
-const md = new MarkdownIt({ html: true, linkify: true, typographer: false })
-  .use(mdDeflist)
-  .use(mdTaskLists, { enabled: true })
-  .use(mdFootnote);
+// The dialect is CommonMark plus the extensions below, each one named here
+// rather than assumed -- see DIALECT.md for what is in and what is not.
+//
+// Footnotes are not in CommonMark, and their absence was not uniformly quiet:
+// a definition that is a bare word or a URL parses as a shortcut reference
+// link, so `[^1]: https://example.com/paper` silently turned the marker into a
+// live link and dropped the note. (A definition that reads as a sentence falls
+// through as literal text instead -- visible, and merely ugly.)
+//
+// Image sizing (`![a](f.jpg =400x300)`) is always on: it adds width/height to
+// an <img> and cannot change a document's structure. Figure wrapping is opt-in
+// -- see parserFor below.
+// `auto_figure` is opt-in, and the reason is compatibility rather than taste.
+// The plugin wraps ANY lone image in a paragraph, and markdown-it parses raw
+// HTML blocks opaquely -- so an image inside a hand-written <figure> gets a
+// second, nested <figure> with the alt text repeated as a visible caption. A
+// document doing that is not doing anything wrong: a caption carrying bold
+// text or maths cannot live in alt text, and two plates sharing one caption
+// cannot be written as `![]()` at all. Defaulting this on would break every
+// such document silently, in the layout rather than with an error.
+//
+// (The plugin offers no way to skip images already inside a figure, and could
+// not: by the time it sees the image, the surrounding <figure> is an opaque
+// HTML block token.)
+const FEATURE_PARSERS = new Map();
+
+function parserFor(featureList) {
+  const wanted = ` ${featureList} `;
+  const autoFigure = wanted.includes(' auto_figure ')
+                  && !wanted.includes(' no_auto_figure ');
+  const key = autoFigure ? 'figure' : 'plain';
+
+  let parser = FEATURE_PARSERS.get(key);
+  if (parser) return parser;
+
+  parser = new MarkdownIt({ html: true, linkify: true, typographer: false })
+    .use(mdDeflist)
+    .use(mdTaskLists, { enabled: true })
+    .use(mdFootnote);
+
+  // BOTH size syntaxes, and this registration order is load-bearing.
+  // `=400x300` after the URL is the de-facto convention (GitLab, Typora and
+  // others); `![alt =400x300](f.jpg)` is what this plugin's maintained export
+  // reads. Registering imgSize first makes the legacy form fail in the worst
+  // way -- the `=400x300` survives into the alt text and therefore into the
+  // caption. legacyImgSize first, then imgSize, and both spellings resolve.
+  if (autoFigure) parser = parser.use(mdFigure);
+  parser = parser.use(mdImgSizeLegacy).use(mdImgSize);
+
+  FEATURE_PARSERS.set(key, parser);
+  return parser;
+}
 
 function parseFrontMatter(source) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(\r?\n|$)/);
@@ -270,7 +315,8 @@ function buildHtml(mdSource, inputBase, payloadDir, extraCss) {
     if (themeFeatures) meta.pdfulator_features = themeFeatures;
   }
 
-  const renderedBody = md.render(body);
+  const parser = parserFor(meta.pdfulator_features || '');
+  const renderedBody = parser.render(body);
 
   // The structural file, named by the payload's own template.conf rather than
   // looked for under an agreed filename. `article.tmpl` at the payload root was
@@ -291,7 +337,7 @@ function buildHtml(mdSource, inputBase, payloadDir, extraCss) {
     : FALLBACK_TMPL;
 
   // Render inline markdown in title/subtitle (e.g. _pdfulator_ → <em>pdfulator</em>)
-  const mdInline = s => s ? md.renderInline(String(s)) : '';
+  const mdInline = s => s ? parser.renderInline(String(s)) : '';
 
   const ctx = {
     ...meta,
