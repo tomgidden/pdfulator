@@ -1,0 +1,3 @@
+# pdfulator staged directory. kind	level	level-name	path
+styling	20	theme	input/themes/default/default.theme.css
+markup			input/templates/html-mustache-vivlio/template.html.mustache

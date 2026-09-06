@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{title}}</title>
+{{{stylesheets}}}
+</head>
+
+<body class="{{pdfulator_features}}">
+
+  <article>
+
+    <hgroup>
+      <h1 class="doc-title">{{{title}}}</h1>
+      {{#subtitle}}<p class="doc-subtitle">{{{subtitle}}}</p>{{/subtitle}}
+
+      {{#authors}}
+      <address class="doc-author">
+        <span class="author-name">{{name}}</span>{{#affiliation}}<span class="author-affiliation">{{affiliation}}</span>{{/affiliation}}{{#email}}<span class="author-email"><a href="mailto:{{email}}">{{email}}</a></span>{{/email}}
+      </address>
+      {{/authors}}
+
+      {{#project}}<div class="doc-project">{{project}}</div>{{/project}}
+      {{#date}}<time class="doc-date">{{date}}</time>{{/date}}
+      {{#revision}}<div class="doc-revision">{{revision}}</div>{{/revision}}
+    </hgroup>
+
+    <div id="pageFooterLeft" class="page-footer-left">{{#copyright}}<span class="footer-copyright">© {{year}} {{copyright}}</span>{{/copyright}}{{#footer}}<span class="footer-text">{{footer}}</span>{{/footer}}{{#revision}}<span class="footer-revision">{{revision}}</span>{{/revision}}{{^copyright}}{{^footer}} {{/footer}}{{/copyright}}</div>
+
+    <main>
+      {{{body}}}
+    </main>
+
+  </article>
+
+</body>
+</html>
