@@ -164,7 +164,7 @@ stage_root() {
 # Bump it whenever the payload's layout or its generated files change shape.
 # Cheap: the worst case is one restage per theme, which is what an upgrade
 # already implies.
-STAGE_FORMAT=5
+STAGE_FORMAT=6
 
 stage_key() {  # stage_key <chain> <engine> <styler> [css]
 	{
