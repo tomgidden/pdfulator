@@ -586,6 +586,12 @@ These include:
 
 - `strong_href` -- embolden hyperlinks to make them stand out.
 
+- `no_math` - Turn off LaTeX maths. Maths is **on** by default: `$x^2$` inline
+  and `$$...$$` for a display equation, rendered by KaTeX while the document is
+  parsed, so there is no script in the page and nothing fetched at render time.
+  Turn it off for a document where `$` is more likely to mean currency than
+  mathematics.
+
 - `auto_figure` - Wrap a lone image in a `<figure>`, using its alt text (or its
   title, if given) as the caption. Off by default, because it wraps *every*
   image that sits alone in a paragraph -- including one inside a `<figure>` you

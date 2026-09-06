@@ -8,6 +8,7 @@
     "@mdit/plugin-figure": "^1.2.0",
     "@mdit/plugin-footnote": "^1.1.0",
     "@mdit/plugin-img-size": "^1.1.0",
+    "@mdit/plugin-katex": "^1.1.0",
     "@puppeteer/browsers": "^2.3.0",
     "@vivliostyle/viewer": "^2.0.0",
     "js-yaml": "^4.1.0",

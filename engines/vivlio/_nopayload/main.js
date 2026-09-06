@@ -43,6 +43,7 @@ import { footnote as mdFootnote } from '@mdit/plugin-footnote';
 import { figure as mdFigure } from '@mdit/plugin-figure';
 import { imgSize as mdImgSize, legacyImgSize as mdImgSizeLegacy }
   from '@mdit/plugin-img-size';
+import { katex as mdKatex } from '@mdit/plugin-katex';
 import yaml from 'js-yaml';
 import Mustache from 'mustache';
 import puppeteer from 'puppeteer-core';
@@ -114,13 +115,28 @@ const FALLBACK_TMPL = `<!DOCTYPE html>
 // (The plugin offers no way to skip images already inside a figure, and could
 // not: by the time it sees the image, the surrounding <figure> is an opaque
 // HTML block token.)
+// Maths is ON by default, and `no_math` turns it off.
+//
+// On by default because KaTeX renders at parse time, here, with no script in
+// the page and no network: the cost of having it available is a stylesheet in
+// the payload, not a slower or more fragile render. That is also why KaTeX and
+// not MathJax -- 4.7MB against 112MB installed, most of MathJax's bulk being a
+// speech-rule engine that means nothing on paper.
+//
+// The `$...$` delimiters are the ones CommonMark's own math threads worry
+// about colliding with prose. In practice the plugin requires no space after
+// the opening `$`, so "it cost $5 and then $10" stays text, code spans are
+// untouched and `\$` escapes. A sentence like "$1,200 in $2024$ terms" does
+// misfire -- but that text is genuinely delimiter-shaped, and `no_math` is
+// there for a document that would rather not have the ambiguity at all.
 const FEATURE_PARSERS = new Map();
 
 function parserFor(featureList) {
   const wanted = ` ${featureList} `;
   const autoFigure = wanted.includes(' auto_figure ')
                   && !wanted.includes(' no_auto_figure ');
-  const key = autoFigure ? 'figure' : 'plain';
+  const math = !wanted.includes(' no_math ');
+  const key = `${autoFigure ? 'figure' : 'plain'}:${math ? 'math' : 'nomath'}`;
 
   let parser = FEATURE_PARSERS.get(key);
   if (parser) return parser;
@@ -138,6 +154,18 @@ function parserFor(featureList) {
   // caption. legacyImgSize first, then imgSize, and both spellings resolve.
   if (autoFigure) parser = parser.use(mdFigure);
   parser = parser.use(mdImgSizeLegacy).use(mdImgSize);
+
+  // `throwOnError: false` renders a malformed expression in red rather than
+  // aborting the document. A typo in one formula should cost that formula, not
+  // the whole conversion -- the same reasoning as a missing image not being
+  // fatal.
+  if (math) {
+    parser = parser.use(mdKatex, {
+      delimiters: 'dollars',
+      throwOnError: false,
+      logger: () => {},
+    });
+  }
 
   FEATURE_PARSERS.set(key, parser);
   return parser;

@@ -156,6 +156,62 @@ check "wrong arity exits 2" "2" \
       "$("$ENGINE" in.md out.pdf >/dev/null 2>&1; echo $?)"
 
 
+echo "============ MATHS ============"
+# `$x$` is rendered by KaTeX at parse time -- no script in the page, no
+# network, so nothing to race and nothing to 404. The assertion is on the
+# fonts: KaTeX draws maths in its own faces, and a PDF only embeds a face whose
+# glyphs were actually used. Text cannot be read out of the PDF (Chromium
+# encodes it as glyph ids), and size proves nothing, so the embedded face name
+# is the evidence available.
+# These need a STAGED payload rather than the raw theme directory the rest of
+# this suite passes. That is not a workaround: KaTeX's stylesheet is declared
+# by the template, so it reaches a document the way every other stylesheet
+# does -- through staging. Handed a bare theme, the engine still produces the
+# right markup, but with nothing to style it: KaTeX's HTML and its MathML
+# fallback both become visible, which is worse than no maths at all. Every real
+# conversion goes through the wrapper, and the wrapper always stages.
+STAGED=$(
+	PDFULATOR_DIR="$ROOT" sh -c '
+		. "$1/lib/conf.sh";     . "$1/lib/paths.sh"
+		. "$1/lib/theme.sh";    . "$1/lib/template.sh"
+		. "$1/lib/styling.sh";  . "$1/lib/fonts.sh"
+		. "$1/lib/engines.sh";  . "$1/lib/stage.sh"
+		stage_dir "$1/themes/default" vivlio vivliostyle fonts
+	' _ "$ROOT" 2>/dev/null | tail -1
+)
+
+fixture
+printf -- '# M\n\nInline $x_{n+1} = r_n x_r$ and display:\n\n$$\\lambda = \\int_0^1 f(x)dx$$\n' > math.md
+"$ENGINE" math.md math.pdf "$STAGED" >/dev/null 2>&1
+check "maths renders in KaTeX fonts" "yes" \
+      "$(grep -aq 'KaTeX_Math' math.pdf && echo yes || echo no)"
+
+# Off with no_math, and the same document must then embed no KaTeX face at all.
+# Without this the check above would pass with the flag ignored.
+fixture
+printf -- '---\npdfulator_features: no_math\n---\n\n# M\n\nInline $x_{n+1} = r_n x_r$ and display:\n\n$$\\lambda = \\int_0^1 f(x)dx$$\n' > nomath.md
+"$ENGINE" nomath.md nomath.pdf "$STAGED" >/dev/null 2>&1
+check "no_math turns it off" "absent" \
+      "$(grep -aq 'KaTeX_' nomath.pdf && echo present || echo absent)"
+
+# A dollar amount is not an equation. The plugin requires no space after the
+# opening delimiter, which is what keeps ordinary prose out of maths mode --
+# this is the collision the CommonMark math threads worry about.
+fixture
+printf -- '# Prices\n\nIt cost $5 and then $10 more.\n' > prices.md
+"$ENGINE" prices.md prices.pdf "$STAGED" >/dev/null 2>&1
+check "prices are not maths" "absent" \
+      "$(grep -aq 'KaTeX_' prices.pdf && echo present || echo absent)"
+
+# A malformed expression costs that expression, not the document: same rule as
+# a missing image. throwOnError is off, so this must still produce a PDF.
+fixture
+printf -- '# Bad\n\nBroken $\\frac{1}{$ here.\n\nText after.\n' > bad.md
+"$ENGINE" bad.md bad.pdf "$STAGED" >/dev/null 2>&1
+check "a malformed formula still renders" "yes" \
+      "$(is_pdf bad.pdf && echo yes || echo no)"
+
+
 echo "============ IMAGES: SIZE AND FIGURES ============"
 # Image sizing is always on and cannot change document structure, so it needs
 # no flag. Both spellings are accepted: `=400x300` after the URL (the de-facto
