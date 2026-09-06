@@ -39,6 +39,7 @@ import { fileURLToPath } from 'url';
 import MarkdownIt from 'markdown-it';
 import mdDeflist from 'markdown-it-deflist';
 import mdTaskLists from 'markdown-it-task-lists';
+import { footnote as mdFootnote } from '@mdit/plugin-footnote';
 import yaml from 'js-yaml';
 import Mustache from 'mustache';
 import puppeteer from 'puppeteer-core';
@@ -86,9 +87,16 @@ const FALLBACK_TMPL = `<!DOCTYPE html>
 
 // Markdown → HTML
 
+// Footnotes are not in CommonMark, and their absence was not a quiet one.
+// markdown-it parses `Text[^1]` with `[^1]: note` below it as a shortcut
+// reference link -- so the document rendered with a link to a page named
+// "note", no warning and nothing literal to notice. A silently plausible wrong
+// document is worse than an unsupported construct, which is what made this
+// worth fixing before the features that merely don't work yet.
 const md = new MarkdownIt({ html: true, linkify: true, typographer: false })
   .use(mdDeflist)
-  .use(mdTaskLists, { enabled: true });
+  .use(mdTaskLists, { enabled: true })
+  .use(mdFootnote);
 
 function parseFrontMatter(source) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(\r?\n|$)/);

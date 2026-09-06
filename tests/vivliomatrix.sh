@@ -156,6 +156,39 @@ check "wrong arity exits 2" "2" \
       "$("$ENGINE" in.md out.pdf >/dev/null 2>&1; echo $?)"
 
 
+echo "============ FOOTNOTES ============"
+# Footnotes are not in CommonMark. Without a plugin markdown-it does not merely
+# ignore them -- for a single-word or URL definition it parses `[^1]` as a
+# shortcut reference link, so `[^1]: https://example.com/paper` silently turns
+# the marker into a live link and drops the note. (A definition that is an
+# ordinary sentence falls through as literal text instead: visible, not
+# dangerous. The hazard is narrow but a citation holding just a DOI is an
+# entirely ordinary thing to write.)
+#
+# The assertion is on the internal link annotations the plugin produces: a
+# footnote reference and its backref are anchors, so a working render has
+# /Link annotations and a document without footnote support has none. That is
+# structural rather than cosmetic -- restyling the notes cannot fake it, and
+# removing the plugin cannot keep it.
+fixture
+cat > fn.md <<'MD'
+# Notes
+
+Chaos was described here[^markus], and the exponent[^lyap] follows.
+
+[^markus]: Markus, M. *Computers in Physics* **4**, 1990.
+[^lyap]: The Lyapunov exponent, with *emphasis* inside the note.
+MD
+"$ENGINE" fn.md fn.pdf "$THEME" >/dev/null 2>&1
+check "footnotes link to their notes" "yes"       "$([ "$(grep -ac '/Link' fn.pdf)" -gt 0 ] && echo yes || echo no)"
+
+# A document with no footnotes must not grow a footnote section -- the plugin
+# is not allowed to add furniture to documents that never asked for it.
+fixture
+"$ENGINE" in.md plain.pdf "$THEME" >/dev/null 2>&1
+check "and a plain document gets none" "0" "$(grep -ac '/Link' plain.pdf)"
+
+
 echo "============ DOCUMENT-RELATIVE ASSETS ============"
 # `![](fig.svg)` resolves against the document, not against the temporary
 # directory the generated HTML lives in. This failed silently for a long time:

@@ -118,3 +118,44 @@ hr {
 .author-email::after {
   content: '>';
 }
+/* Footnotes.
+ *
+ * Endnotes: markdown-it collects them into one <section> at the end of the
+ * document rather than at the foot of each page. Page-bottom placement is a
+ * paged-media feature (Vivliostyle has float: footnote, Paged.js does it
+ * differently, FOP differently again), so it is deliberately not attempted
+ * here -- one answer that every engine renders identically beats three that
+ * diverge. The structure is the plugin's; only the appearance is ours.
+ */
+.footnotes {
+  font-size: 0.85em;
+  margin-top: 2em;
+}
+
+/* The plugin emits its own <hr class="footnotes-sep">, which would otherwise
+ * inherit the full-width rule above. A footnote separator is conventionally
+ * short and set left. */
+hr.footnotes-sep {
+  border-top: 1px solid #999;
+  margin: 2em 0 0.8em;
+  width: 30%;
+}
+
+.footnotes-list {
+  padding-left: 1.2em;
+}
+
+.footnote-item {
+  margin-bottom: 0.4em;
+}
+
+/* The reference mark: raised, small, and not underlined like a body link. */
+.footnote-ref a {
+  text-decoration: none;
+}
+
+/* The backref arrow is navigation, not content: useful on screen, meaningless
+ * on paper, where you cannot click it. */
+.footnote-backref {
+  display: none;
+}
