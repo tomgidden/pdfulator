@@ -269,6 +269,39 @@ check "pandoc-xslt needs no browser" "1" "$(engine_needs_browser pandoc-xslt; ec
 check "pandoc-xslt needs docker"     "0" "$(engine_needs_docker pandoc-xslt; echo $?)"
 
 
+echo "============ DEPENDENCIES ============"
+# Where an engine's dependencies live: under _nopayload/, beside the code that
+# imports them. This had rotted to the engine root, and the failure was silent
+# in the worst way -- the package.json test failed, `continue` skipped the
+# engine, and every engine reported ready. `--install` then installed a runtime
+# and a browser, said nothing about dependencies, and the render failed on the
+# one path that had the location right.
+#
+# So the assertions are on both answers. "Ready when present" alone would still
+# pass with the paths wrong.
+setup
+mkdir -p "$ENGINES_DIR/vivlio/_nopayload"
+printf '{}\n' > "$ENGINES_DIR/vivlio/_nopayload/package.json"
+check "not ready without node_modules" "1" "$(engines_deps_ready; echo $?)"
+
+mkdir -p "$ENGINES_DIR/vivlio/_nopayload/node_modules"
+check "ready once installed"           "0" "$(engines_deps_ready; echo $?)"
+
+# A package.json at the engine root is not where dependencies live. If this
+# passes while the _nopayload one is absent, the paths have rotted back.
+setup
+mkdir -p "$ENGINES_DIR/vivlio/node_modules"
+printf '{}\n' > "$ENGINES_DIR/vivlio/package.json"
+check "the engine root is not consulted" "0" "$(engines_deps_ready; echo $?)"
+
+# An engine needing no runtime has no dependencies to miss -- otherwise a
+# pandoc-xslt user is sent to install them forever.
+setup
+mkdir -p "$ENGINES_DIR/pandoc-xslt/_nopayload"
+printf '{}\n' > "$ENGINES_DIR/pandoc-xslt/_nopayload/package.json"
+check "a non-JS engine is not asked"   "0" "$(engines_deps_ready; echo $?)"
+
+
 echo "============ DEPRECATION ============"
 setup
 check "a deprecated engine is flagged" "0" "$(engine_is_deprecated pandoc-xslt; echo $?)"

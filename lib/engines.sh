@@ -238,11 +238,18 @@ engines_describe() {
 # Only engines declaring needs_runtime=js are asked about: an engine that needs
 # no runtime has no node_modules to be missing, and treating its absence as
 # "not ready" would send a pandoc-xslt user to install dependencies forever.
+# The manifest and the installed tree are under _nopayload/, beside the code
+# that imports them -- dependencies are part of the engine's program, not of
+# what it hands to a renderer. Looking for them at the engine root instead made
+# this answer "ready" for every engine: the package.json test failed, `continue`
+# skipped the engine, and --install silently never ran `bun install`. The
+# missing directory then surfaced at render time, from the one path that had
+# the location right.
 engines_deps_ready() {
 	for _edr in $(engines_list); do
 		engine_needs_runtime "$_edr" || continue
-		[ -f "$ENGINES_DIR/$_edr/package.json" ] || continue
-		[ -d "$ENGINES_DIR/$_edr/node_modules" ] || return 1
+		[ -f "$ENGINES_DIR/$_edr/_nopayload/package.json" ] || continue
+		[ -d "$ENGINES_DIR/$_edr/_nopayload/node_modules" ] || return 1
 	done
 	return 0
 }
