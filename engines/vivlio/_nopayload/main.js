@@ -307,32 +307,26 @@ function buildHtml(mdSource, inputBase, payloadDir, extraCss) {
 // Vivliostyle viewer is bundled alongside this script
 const VIEWER_DIR = path.join(SCRIPT_DIR, 'node_modules', '@vivliostyle', 'viewer', 'lib');
 
-function serveDir(dir, port) {
-  const server = createServer((req, res) => {
-    const filePath = path.join(dir, decodeURIComponent(req.url.split('?')[0]));
-    fs.readFile(filePath, (err, data) => {
-      if (err) { res.writeHead(404); res.end(); return; }
-      const ext = path.extname(filePath).slice(1);
-      const mime = {
-        html: 'text/html', css: 'text/css', js: 'application/javascript',
-        json: 'application/json', pdf: 'application/pdf',
-        otf: 'font/otf', ttf: 'font/ttf', woff: 'font/woff', woff2: 'font/woff2',
-        svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg',
-      }[ext] || 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': mime });
-      res.end(data);
-    });
-  });
-  return new Promise((resolve, reject) => {
-    server.listen(port, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
-
-async function htmlToPdf(htmlPath, pdfPath, chromiumPath, payloadDir, verbose) {
-  // Serve from the tmp dir containing the HTML (so relative CSS/font paths work)
-  const serveRoot = path.dirname(htmlPath);
+// docRoot is the directory the SOURCE document came from, not the temporary
+// directory the generated HTML lives in. That distinction is the whole of the
+// relative-asset fix: `![](fig.png)` becomes `<img src="fig.png">`, the browser
+// resolves it against the page's own URL under /doc/, and the file it wants is
+// beside the markdown -- never in the temp directory, which holds exactly one
+// generated .html and nothing else.
+//
+// Reachable in both vivlio engines, for different reasons: the bundled one
+// reads the user's filesystem directly, and the containerised one gets the
+// document's directory bind-mounted at /in (see lib/container.sh, which mounts
+// dirname(input) for precisely this reason). A remote engine would have neither
+// and needs assets discovered and staged instead -- see DIALECT.md.
+//
+// The generated HTML is served beside them at /doc/, from memory rather than
+// from disk: writing it into the document's directory would mean staging
+// writing to the user's source tree, and /in is read-only in any case.
+async function htmlToPdf(htmlPath, pdfPath, chromiumPath, payloadDir, docRoot, verbose) {
+  const serveRoot = docRoot;
   const htmlFilename = path.basename(htmlPath);
+  const htmlBody = fs.readFileSync(htmlPath);
 
   // Find a free port
   const port = await new Promise((resolve, reject) => {
@@ -341,17 +335,20 @@ async function htmlToPdf(htmlPath, pdfPath, chromiumPath, payloadDir, verbose) {
     s.on('error', reject);
   });
 
-  const docServer = await serveDir(serveRoot, port);
-
-  // Also serve defaults and payload from the same origin via symlinks would be messy;
-  // instead serve from filesystem root so absolute paths work.
-  // Vivliostyle viewer needs to be reachable too — serve it at /vivliostyle/
-  // We use a single server that muxes by path prefix.
-  docServer.close();
-
+  // One server, muxed by path prefix: the viewer at /vivliostyle/, the document
+  // and its assets at /doc/, the payload at /payload/.
   const muxServer = createServer((req, res) => {
     let filePath;
     const url = decodeURIComponent(req.url.split('?')[0]);
+
+    // The generated page is the one thing under /doc/ that is not on disk
+    // there. Answered from memory so the document's directory stays untouched
+    // and read-only.
+    if (url === `/doc/${htmlFilename}`) {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(htmlBody);
+      return;
+    }
 
     if (url.startsWith('/vivliostyle/')) {
       filePath = path.join(VIEWER_DIR, url.slice('/vivliostyle/'.length));
@@ -514,7 +511,15 @@ async function convert(input, output, payloadDir, opts) {
     // cannot leave a half-written file that still looks like a PDF. stdout
     // gets the bytes instead, there being nothing to move.
     const tmpPdf = path.join(tmpDir, `${leaf}.pdf`);
-    await htmlToPdf(htmlPath, tmpPdf, process.env.CHROME_PATH, payloadDir, opts.verbose);
+    // Relative references resolve against the document, so the directory the
+    // document came from is what gets served -- not the temp directory holding
+    // the generated HTML, which is where this used to point and why every
+    // `![](fig.png)` rendered as a broken image. stdin has no directory of its
+    // own; the temp directory is the honest answer there, and a piped document
+    // referencing a relative asset has nothing for that path to mean anyway.
+    const docRoot = input === '-' ? tmpDir : path.dirname(path.resolve(input));
+
+    await htmlToPdf(htmlPath, tmpPdf, process.env.CHROME_PATH, payloadDir, docRoot, opts.verbose);
 
     if (output === '-') {
       process.stdout.write(fs.readFileSync(tmpPdf));
