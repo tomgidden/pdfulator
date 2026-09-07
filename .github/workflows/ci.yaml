@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Every engine declaring needs_docker=yes, paired with the tag its
       # engine.conf `image=` key claims. That key is what the wrapper pulls at
@@ -94,7 +94,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # The engine id is the primary tag, and every version tag is suffixed
       # with it. `:vivlio` is the moving latest for that engine, `:vivlio-3.0.0`
@@ -149,7 +149,7 @@ jobs:
           mv "${{ steps.meta.outputs.bake-file }}" "/tmp/bake-meta.json"
 
       - name: Upload meta bake definition
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: bake-meta-${{ matrix.engine }}
           path: /tmp/bake-meta.json
@@ -187,10 +187,10 @@ jobs:
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Download meta bake definition
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: bake-meta-${{ matrix.engine }}
           path: /tmp
@@ -254,7 +254,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.engine }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
@@ -285,7 +285,7 @@ jobs:
 
     steps:
       - name: Download meta bake definition
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: bake-meta-${{ matrix.engine }}
           path: /tmp
@@ -293,7 +293,7 @@ jobs:
       # This engine's digests only -- every platform of it, and nothing from
       # the other engines, which are being merged by their own copy of this job.
       - name: Download digests
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
           pattern: digests-${{ matrix.engine }}-*
@@ -392,7 +392,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up bun
         uses: oven-sh/setup-bun@v2
@@ -459,7 +459,7 @@ jobs:
           subject-path: pdfulator.tar.gz
 
       - name: Publish to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             pdfulator.tar.gz
