@@ -363,6 +363,63 @@ check "debug keeps it" "1" \
       "$(ls "$BASE/work" 2>/dev/null | wc -l | tr -d ' ')"
 
 
+echo "============ DOCUMENT-RELATIVE ASSETS ============"
+# `![](fig.png)` resolves against the document. The markdown is copied into the
+# scratch directory -- which is what makes the read-only input mount viable --
+# so the generated HTML sits beside a copy with no siblings, and pagedjs-cli
+# resolves a relative src against the HTML's own location. Without the links
+# below, every document-relative image silently renders as nothing.
+#
+# The vivlio engine had the same bug from the same cause (aa7e38c). This is
+# the pandoc side of it.
+fixture
+mkdir -p "$BASE/in/figs"
+printf 'not really a png\n' > "$BASE/in/fig.png"
+printf 'nor this\n' > "$BASE/in/figs/nested.png"
+printf -- '# Doc\n\n![a](fig.png)\n' > "$BASE/in/doc.md"
+# PDFULATOR_DEBUG keeps the scratch directory, which is the only way to look
+# at what was staged into it.
+( cd "$BASE" && PDFULATOR_DEBUG=1 "$BASE/render" "$BASE/in/doc.md" \
+	"$BASE/out/doc.pdf" "$BASE/payload" >/dev/null 2>&1 )
+check "a sibling file is reachable from the scratch dir" "yes" \
+      "$(ls "$BASE"/work/*/fig.png >/dev/null 2>&1 && echo yes || echo no)"
+check "and so is a sibling directory" "yes" \
+      "$(ls "$BASE"/work/*/figs/nested.png >/dev/null 2>&1 && echo yes || echo no)"
+
+# The document itself is COPIED, not linked: the copy is what lets the engine
+# write beside it without touching a read-only mount. A link here would put
+# the scratch directory's writes back onto the user's document.
+check "the document is a copy, not a link" "yes" \
+      "$(for f in "$BASE"/work/*/doc.md; do [ -f "$f" ] && [ ! -L "$f" ] && echo yes; done)"
+
+# The names this script writes are NOT linked in. A document sits beside its
+# own output by default, so the second render of any document would otherwise
+# link the previous PDF into the scratch directory and then write through that
+# link into the read-only input mount -- EROFS, after a successful render,
+# blamed on a file the user cannot see is involved. Found by running the same
+# document twice, which is what anyone editing a document does.
+fixture
+printf -- '# Doc\n\n![a](fig.png)\n' > "$BASE/in/doc.md"
+printf 'not really a png\n' > "$BASE/in/fig.png"
+printf '%%PDF-1.4 stale\n' > "$BASE/in/doc.pdf"
+( cd "$BASE" && PDFULATOR_DEBUG=1 "$BASE/render" "$BASE/in/doc.md" \
+	"$BASE/out/doc.pdf" "$BASE/payload" >/dev/null 2>&1 )
+check "a previous render is not linked in" "absent" \
+      "$(ls "$BASE"/work/*/doc.pdf >/dev/null 2>&1 && echo present || echo absent)"
+check "but its assets still are" "yes" \
+      "$(ls "$BASE"/work/*/fig.png >/dev/null 2>&1 && echo yes || echo no)"
+
+# A name that cannot be linked costs that asset, not the document. Nothing
+# here should abort: same rule as the vivlio engine, where a missing figure is
+# the author's problem.
+fixture
+printf -- '# Doc\n\n![gone](nosuch.png)\n' > "$BASE/in/doc.md"
+run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
+
+check "a missing asset still renders" "yes" \
+      "$([ -f "$BASE/out/doc.pdf" ] && echo yes || echo no)"
+
+
 echo "============ SET -E ============"
 # render sets -e itself. The theme-override tests above are the ones at risk:
 # a theme without an article.tmpl is the normal case, and `[ -f ] && VAR=` on

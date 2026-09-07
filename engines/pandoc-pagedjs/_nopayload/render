@@ -172,6 +172,45 @@ else
 			break
 		fi
 	done
+
+	# The document's siblings, so that `![](fig.svg)` resolves.
+	#
+	# The generated HTML lives in $WORK, and pagedjs-cli resolves a relative
+	# src against the HTML's own location -- so with only the markdown copied
+	# in, every document-relative image silently renders as nothing at all.
+	# The vivlio engine had the same bug from the same cause (aa7e38c).
+	#
+	# Linked rather than copied: a document beside a directory of figures
+	# should not cost a copy of all of them per render, and $WORK is scratch
+	# that is deleted on exit.
+	#
+	# NOT the names this script writes. $WORK/$leaf.html and $WORK/$leaf.pdf
+	# are its own outputs, and a document sitting beside a previous render's
+	# PDF -- the overwhelmingly common case, since that is where output lands
+	# by default -- would otherwise get that PDF linked in and then written
+	# THROUGH the link into the read-only input mount. EROFS, after a
+	# successful render, from a file the user cannot see is involved.
+	#
+	# Failures are ignored deliberately: a name that cannot be linked is one
+	# asset missing from one document, and the rest of it is still worth
+	# rendering. Same rule as the vivlio engine, where a missing figure is the
+	# author's problem rather than a reason to abort.
+	indir=$(dirname -- "$in")
+	if [ -d "$indir" ]; then
+		for sibling in "$indir"/* "$indir"/.[!.]*; do
+			[ -e "$sibling" ] || continue
+			name=$(basename -- "$sibling")
+			case $name in
+				"$leaf.html"|"$leaf.pdf") continue ;;
+			esac
+			# `if` rather than `[ ... ] && continue`: under set -e a
+			# bare test as the last command of the loop body fails the
+			# whole loop when it is false.
+			if [ ! -e "$WORK/$name" ]; then
+				ln -s -- "$sibling" "$WORK/$name" 2>/dev/null || true
+			fi
+		done
+	fi
 fi
 
 # Markdown -> HTML.
