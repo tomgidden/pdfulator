@@ -251,60 +251,36 @@ fi
 #   (absent)                                  PFM as-is
 #
 # A value starting with `+` or `-` is relative and is appended to PFM_FORMAT;
-# anything else names its own base and replaces it. That rule is the whole of
-# it, and it falls out of pandoc's grammar rather than being invented here --
-# which is why the value is passed to -f untouched rather than parsed into
-# parts. Pandoc validates it, and rejects an unknown extension with a message
-# naming it.
+# anything else names its own base and replaces it. The value is then passed to
+# -f untouched rather than parsed into parts: the grammar is pandoc's, so
+# pandoc validates it and names the offending extension when it is wrong.
 #
-# Read with sed rather than a YAML parser because this runs before pandoc has
-# parsed anything -- the value has to be known in order to *build* the pandoc
-# command line. It is a single scalar on one line, which sed can find; anything
-# more elaborate is not worth supporting here.
+# READ FROM THE SIDECAR ONLY. The wrapper splits every document's frontmatter
+# into a .yaml beside the body before this runs (lib/frontmatter.sh), so by the
+# time the engine sees a document there is nothing left inside it to scan --
+# and a document reaching this engine WITHOUT the wrapper has no payload and no
+# theme either, so it is not a case this key needs to work in.
 #
-# ANCHORED TO LINE 1. Without that, sed's range matches the first `---`...`---`
-# pair anywhere in the file, so a document with a horizontal rule and a later
-# `---` would have its BODY scanned for this key. Pandoc itself only honours
-# frontmatter at the start, and so does this.
+# An earlier version scanned the document too, with a sed expression that had
+# to be anchored to line 1 (or a horizontal rule three paragraphs down started
+# a metadata block) and whose closing brace had to sit on its own line (or BSD
+# sed rejected it, while the container's GNU sed did not). Both traps went away
+# with the scan: the wrapper does this once now, for every engine, and this
+# reads a single key out of a file that holds nothing else.
 #
-# The `}` sits on its own line because BSD sed rejects it otherwise ("bad flag
-# in substitute command"). The container has GNU sed, so getting this wrong
-# would work here and fail on a macOS host running the engine directly.
-#
-# Both sources are read, sidecar first, so the document's own frontmatter wins
-# -- the same precedence the vivlio engine gives a sidecar, and the same one
-# --metadata-file gets below.
-mf_from() {  # mf_from <file> -- markdown_features, from frontmatter or a sidecar
-	[ -f "$1" ] || return 0
-	case $1 in
-		*.md|*.markdown)
-			sed -n '1{
-/^---[[:space:]]*$/!q
-}
-1,/^\(---\|\.\.\.\)[[:space:]]*$/{
-s/^markdown_features:[[:space:]]*//p
-}' "$1"
-			;;
-		*)
-			sed -n 's/^markdown_features:[[:space:]]*//p' "$1"
-			;;
-	esac
-}
-
+# Still not a YAML parser, deliberately. The value has to be known in order to
+# BUILD the pandoc command line, so it cannot wait for pandoc to parse the
+# metadata -- but it is one scalar on one line, which is the only thing here
+# that needs reading before the fact.
 mf=""
 if [ "$in" != "-" ]; then
 	for ext in yaml yml; do
 		if [ -f "${in%.*}.$ext" ]; then
-			mf=$(mf_from "${in%.*}.$ext" | head -1)
+			mf=$(sed -n 's/^markdown_features:[[:space:]]*//p' \
+				"${in%.*}.$ext" | head -1)
 			break
 		fi
 	done
-fi
-mf_doc=$(mf_from "$SOURCE" | head -1)
-# `if` rather than `[ ... ] && ...`: under set -e a bare test that is false
-# fails the script when it is the last command run.
-if [ -n "$mf_doc" ]; then
-	mf=$mf_doc
 fi
 
 mf=$(printf '%s' "$mf" | tr -d '\r' | sed 's/[[:space:]]*$//')
