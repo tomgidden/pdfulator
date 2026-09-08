@@ -8,6 +8,7 @@
 LIB=$(cd "$(dirname "$0")/../lib" && pwd)
 . "$LIB/conf.sh"
 . "$LIB/paths.sh"
+. "$LIB/frontmatter.sh"
 
 BASE=$(printf '%s' "${TMPDIR:-/tmp}" | sed 's|/*$||')/pdfulator-enginematrix
 FAIL=0
@@ -267,6 +268,64 @@ check "vivlio needs no docker"       "1" "$(engine_needs_docker vivlio; echo $?)
 check "pandoc-xslt needs no runtime" "1" "$(engine_needs_runtime pandoc-xslt; echo $?)"
 check "pandoc-xslt needs no browser" "1" "$(engine_needs_browser pandoc-xslt; echo $?)"
 check "pandoc-xslt needs docker"     "0" "$(engine_needs_docker pandoc-xslt; echo $?)"
+
+
+echo "============ FRONTMATTER SPLIT ============"
+# engine_convert hands the engine a body-only copy plus a .yaml sidecar, so no
+# engine parses frontmatter itself. The cases below are all about WHERE those
+# two files go, which is the part that broke.
+#
+# The split halves land IN the document's directory, under a dotted prefix --
+# not in a subdirectory of it. An engine resolves `![](figs/plot.svg)` against
+# the directory holding the file it was given, so a copy one level down looks
+# for `.pdfulator.XXXX/figs/plot.svg` and finds nothing. The first version did
+# exactly that and silently broke every document with both frontmatter and a
+# relative image.
+setup
+mkdir -p "$BASE/doc/figs"
+printf 'svg\n' > "$BASE/doc/figs/plot.svg"
+printf -- '---\ntitle: T\n---\n\n![a](figs/plot.svg)\n' > "$BASE/doc/a.md"
+
+# The engine records the input path it was given; a stub is enough to see it.
+cat > "$BASE/dist/engines/vivlio/convert" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$1" > "$2"
+STUB
+chmod +x "$BASE/dist/engines/vivlio/convert"
+
+engine_convert vivlio "$BASE/doc/a.md" "$BASE/seen" "$BASE/payload" >/dev/null 2>&1
+check "the body copy is in the document's own directory" "yes" \
+      "$([ "$(dirname "$(cat "$BASE/seen")")" = "$BASE/doc" ] && echo yes || echo no)"
+check "and keeps the document's extension" "md" \
+      "$(f=$(cat "$BASE/seen"); echo "${f##*.}")"
+
+# Nothing is left behind: the halves are the wrapper's, not the user's.
+check "the split files are cleaned up" "0" \
+      "$(ls -a "$BASE/doc" 2>/dev/null | grep -c '^\.pdfulator')"
+
+# A document with no frontmatter is passed through as itself. Copying it would
+# cost a write per conversion for no gain, and would move it away from its own
+# assets for no reason.
+setup
+mkdir -p "$BASE/doc"
+printf -- '# Just a heading\n' > "$BASE/doc/b.md"
+cat > "$BASE/dist/engines/vivlio/convert" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$1" > "$2"
+STUB
+chmod +x "$BASE/dist/engines/vivlio/convert"
+engine_convert vivlio "$BASE/doc/b.md" "$BASE/seen" "$BASE/payload" >/dev/null 2>&1
+check "a document without frontmatter is untouched" "$BASE/doc/b.md" "$(cat "$BASE/seen")"
+
+# stdin has no file to split and no directory to write into.
+setup
+cat > "$BASE/dist/engines/vivlio/convert" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$1" > "$2"
+STUB
+chmod +x "$BASE/dist/engines/vivlio/convert"
+engine_convert vivlio - "$BASE/seen" "$BASE/payload" </dev/null >/dev/null 2>&1
+check "stdin is passed through as -" "-" "$(cat "$BASE/seen")"
 
 
 echo "============ DEPENDENCIES ============"

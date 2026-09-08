@@ -372,13 +372,98 @@ engine_prepare() {  # engine_prepare <id> [force]
 # already settled by the caller, and the engine is told rather than left to
 # find out. Exported here rather than by each engine so that every engine sees
 # the same contract.
+# Run an engine over one document.
+#
+#   engine_convert <id> <input|-> <output|-> <payload-dir>
+#
+# FRONTMATTER IS SPLIT OFF HERE, and this is the only place it happens.
+# The engine receives a body-only copy of the document plus a `.yaml` sidecar
+# beside it, which is the one metadata mechanism every engine already
+# supports -- js-yaml reads it in the vivlio engine, --metadata-file in the
+# pandoc ones. Before this, metadata reached the engines three different ways
+# and each understood a different set of spellings; the vivlio engine read
+# `---` with js-yaml, pandoc read it with yaml_metadata_block, and `<!--yaml`
+# worked nowhere. One implementation in lib/ is the same reasoning that moved
+# job planning and theme resolution here (see lib/jobs.sh).
+#
+# What this costs, stated plainly: the engine no longer sees the file the user
+# named. Its own copy has the same basename, so anything deriving a title or an
+# output name from it is unaffected, and the document's real directory is still
+# what relative assets resolve against -- but a bare `docker run` bypassing the
+# wrapper gets no frontmatter handling at all. That is already true of themes,
+# fonts and payloads, so it is consistent rather than a new limitation: without
+# the wrapper, supply a sidecar or use an engine that parses its own.
+#
+# A document with no frontmatter is passed through untouched, so the common
+# case costs nothing but a stat.
 engine_convert() {  # engine_convert <id> <input|-> <output|-> <payload-dir>
 	_ec_id=$1
-	shift
+	_ec_in=$2
+	_ec_out=$3
+	_ec_payload=$4
+
+	# The split halves are written INTO the document's own directory, under a
+	# dotted prefix, rather than into a subdirectory of it. That is not
+	# cosmetic: an engine resolves `![](figs/plot.svg)` against the directory
+	# holding the file it was given, so a copy one level down looks for
+	# `.pdfulator.XXXX/figs/plot.svg` and finds nothing. A first version put
+	# them in a subdirectory "beside the document" and silently broke every
+	# document that had both frontmatter and a relative image -- which is most
+	# real ones.
+	_ec_tmp=""
+	_ec_stem=""
+	if [ "$_ec_in" != "-" ] && [ -f "$_ec_in" ] \
+		&& [ -n "$(frontmatter_find "$_ec_in" 2>/dev/null)" ]; then
+
+		_ec_dir=$(dirname -- "$_ec_in")
+		_ec_base=$(basename -- "$_ec_in")
+
+		if [ -w "$_ec_dir" ]; then
+			# mktemp for the collision-free suffix, then rename onto names
+			# that keep the document's extension -- an engine classifies by
+			# it, and `.pdfulator.ab12cd` is not markdown to anyone.
+			_ec_tag=$(mktemp -u "$_ec_dir/.pdfulator.XXXXXX" 2>/dev/null) || _ec_tag=""
+		fi
+
+		if [ -n "$_ec_tag" ]; then
+			_ec_stem=$_ec_tag
+			_ec_body="$_ec_tag.${_ec_base##*.}"
+			_ec_meta="$_ec_tag.yaml"
+
+			if frontmatter_split "$_ec_in" "$_ec_body" "$_ec_meta"; then
+				# A sidecar the author wrote is the authority: they put it
+				# there deliberately, and a block inside the document would
+				# otherwise silently replace it. Merging the two is a YAML
+				# question, and this layer does not parse YAML.
+				for _ec_ext in yaml yml; do
+					if [ -f "${_ec_in%.*}.$_ec_ext" ]; then
+						cp -- "${_ec_in%.*}.$_ec_ext" "$_ec_meta" || return 1
+						break
+					fi
+				done
+				_ec_tmp=$_ec_tag
+				_ec_in=$_ec_body
+			else
+				rm -f -- "$_ec_body" "$_ec_meta"
+				_ec_stem=""
+			fi
+		fi
+		# Not writable, or mktemp failed: the document goes through as it is.
+		# Its frontmatter is then whatever the engine makes of it, which is what
+		# happened before this existed.
+	fi
 
 	# No PDFULATOR_DEFAULTS any more: there is no defaults directory to point
 	# at. Everything an engine used to find there now arrives in the payload it
 	# is handed as its third argument.
 	PDFULATOR_HOME="$PDFULATOR_HOME" \
-		"$(engine_entry "$_ec_id")" "$@"
+		"$(engine_entry "$_ec_id")" "$_ec_in" "$_ec_out" "$_ec_payload"
+	_ec_status=$?
+
+	if [ -n "$_ec_tmp" ]; then
+		rm -f -- "$_ec_tmp".*
+	fi
+	return $_ec_status
 }
+
+
