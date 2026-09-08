@@ -112,12 +112,22 @@ echo "============ PANDOC INVOCATION ============"
 fixture
 run "$BASE/in/doc.md" "$BASE/out/doc.pdf" "$BASE/payload"
 
-# commonmark_x, not pandoc's own markdown dialect: it is CommonMark plus a
-# curated extension set, so a document that renders elsewhere renders here.
-# -raw_html because this pipeline prints to paper, and embedded HTML is a way
-# to smuggle in layout the stylesheet cannot then control.
-check "the format is v1's" "yes" \
-      "$(haslog "$PANDOC_LOG" "commonmark_x-raw_html+task_lists+definition_lists")"
+# pdfulator-flavoured Markdown: commonmark_x plus implicit_figures. Named as
+# an extension set rather than a plugin list, so the dialect is a
+# specification a document can be checked against -- see DIALECT.md.
+#
+# What this assertion used to require, and why it no longer does:
+#
+#   -raw_html   A no-op, verified against pandoc 3.1.11.1: byte-identical
+#               output with and without it, for inline <b> and a block
+#               <figure> alike. Both this comment and the engine's claimed a
+#               restriction that was never in force. Raw HTML is wanted
+#               anyway -- see implicit_figures in DIALECT.md.
+#   +task_lists +definition_lists
+#               Already on by default in commonmark_x, so naming them said
+#               nothing and implied a smaller base set than there is.
+check "the format is PFM" "yes" \
+      "$(haslog "$PANDOC_LOG" "commonmark_x")"
 check "output is html5" "yes" "$(haslog "$PANDOC_LOG" "html5")"
 # The stylesheet does its own code styling; pandoc's inline highlighting would
 # fight it with hardcoded colours.

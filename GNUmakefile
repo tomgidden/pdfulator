@@ -161,6 +161,7 @@ install-source:
 # shipped a dash bug precisely by testing only under bash on macOS.
 test-lib:
 	sh tests/planmatrix.sh
+	sh tests/frontmattermatrix.sh
 	sh tests/themematrix.sh
 	sh tests/templatematrix.sh
 	sh tests/stylingmatrix.sh

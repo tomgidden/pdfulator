@@ -21,13 +21,35 @@ in=${1:--}
 out=${2:--}
 payload=${3:-/payload}
 
-# Pandoc's markdown, with the extensions v1 settled on.
+# pdfulator-flavoured Markdown: commonmark_x plus implicit_figures.
 #
-# commonmark_x rather than pandoc's own markdown: it is CommonMark plus a
-# curated extension set, so a document that renders elsewhere renders here.
-# -raw_html because this pipeline prints to paper -- embedded HTML is a way to
-# smuggle in layout that the stylesheet then cannot control.
-FORMAT=commonmark_x-raw_html+task_lists+definition_lists
+# commonmark_x rather than pandoc's own markdown because it is CommonMark plus
+# a curated, NAMED extension set -- so the dialect is a specification someone
+# can check a document against rather than "whatever the parser happens to do".
+# See DIALECT.md.
+#
+# What was here before, and why it is gone:
+#
+#   -raw_html   A no-op. Verified against pandoc 3.1.11.1: output is byte
+#               identical with and without it, for inline <b> and for a block
+#               <figure> alike. The comment justifying it claimed embedded HTML
+#               smuggles in layout the stylesheet cannot control -- a
+#               restriction that was never actually in force. Raw HTML is
+#               wanted anyway: a caption carrying markup, or two plates under
+#               one caption, can only be written that way.
+#
+#   +task_lists +definition_lists
+#               Both are already on by default in commonmark_x. Naming them
+#               again said nothing and implied the base set was smaller than
+#               it is.
+#
+# implicit_figures is NOT in the baseline, though pandoc offers it. It wraps
+# any lone image, so an image inside a hand-written <figure> gets a second,
+# nested one with the caption repeated -- and a caption carrying markup, or two
+# plates under one caption, can only be written as raw HTML. Opt in with
+# `markdown_features: +implicit_figures`.
+PFM_FORMAT=commonmark_x
+FORMAT=$PFM_FORMAT
 
 # The template comes from the staged directory, which the wrapper built.
 #
@@ -157,8 +179,14 @@ else
 	# with --- and ..., and a sidecar is not: so an unfenced one is parsed as
 	# *markdown* and its text lands in the body of the document --
 	# "title: My Report authors: name: Tom" printed as a paragraph, with the
-	# title unchanged. Fencing it does not help either, because commonmark_x
-	# has no YAML metadata block extension; the values are simply dropped.
+	# title unchanged.
+	#
+	# (An earlier version of this comment went on to say that fencing does not
+	# help either, because commonmark_x has no YAML metadata block extension.
+	# That is wrong: yaml_metadata_block is ON by default in commonmark_x, and
+	# a document's own --- frontmatter is read correctly. The reason to use
+	# --metadata-file for a SIDECAR stands -- an unfenced file is not
+	# frontmatter and pandoc has no reason to treat it as such.)
 	#
 	# --metadata-file reads it as what it is, and matches how the vivlio
 	# engine treats a sidecar, so the same document gets the same title from
@@ -211,6 +239,87 @@ else
 			fi
 		done
 	fi
+fi
+
+# --- markdown_features -------------------------------------------------------
+#
+# A document may change the dialect it is written in, using pandoc's own
+# extension grammar. Three forms, and the difference is whether a base is named:
+#
+#   markdown_features: -smart                 RELATIVE -- PFM, minus smart
+#   markdown_features: commonmark_x-smart     ABSOLUTE -- exactly this
+#   (absent)                                  PFM as-is
+#
+# A value starting with `+` or `-` is relative and is appended to PFM_FORMAT;
+# anything else names its own base and replaces it. That rule is the whole of
+# it, and it falls out of pandoc's grammar rather than being invented here --
+# which is why the value is passed to -f untouched rather than parsed into
+# parts. Pandoc validates it, and rejects an unknown extension with a message
+# naming it.
+#
+# Read with sed rather than a YAML parser because this runs before pandoc has
+# parsed anything -- the value has to be known in order to *build* the pandoc
+# command line. It is a single scalar on one line, which sed can find; anything
+# more elaborate is not worth supporting here.
+#
+# ANCHORED TO LINE 1. Without that, sed's range matches the first `---`...`---`
+# pair anywhere in the file, so a document with a horizontal rule and a later
+# `---` would have its BODY scanned for this key. Pandoc itself only honours
+# frontmatter at the start, and so does this.
+#
+# The `}` sits on its own line because BSD sed rejects it otherwise ("bad flag
+# in substitute command"). The container has GNU sed, so getting this wrong
+# would work here and fail on a macOS host running the engine directly.
+#
+# Both sources are read, sidecar first, so the document's own frontmatter wins
+# -- the same precedence the vivlio engine gives a sidecar, and the same one
+# --metadata-file gets below.
+mf_from() {  # mf_from <file> -- markdown_features, from frontmatter or a sidecar
+	[ -f "$1" ] || return 0
+	case $1 in
+		*.md|*.markdown)
+			sed -n '1{
+/^---[[:space:]]*$/!q
+}
+1,/^\(---\|\.\.\.\)[[:space:]]*$/{
+s/^markdown_features:[[:space:]]*//p
+}' "$1"
+			;;
+		*)
+			sed -n 's/^markdown_features:[[:space:]]*//p' "$1"
+			;;
+	esac
+}
+
+mf=""
+if [ "$in" != "-" ]; then
+	for ext in yaml yml; do
+		if [ -f "${in%.*}.$ext" ]; then
+			mf=$(mf_from "${in%.*}.$ext" | head -1)
+			break
+		fi
+	done
+fi
+mf_doc=$(mf_from "$SOURCE" | head -1)
+# `if` rather than `[ ... ] && ...`: under set -e a bare test that is false
+# fails the script when it is the last command run.
+if [ -n "$mf_doc" ]; then
+	mf=$mf_doc
+fi
+
+mf=$(printf '%s' "$mf" | tr -d '\r' | sed 's/[[:space:]]*$//')
+
+# Strip surrounding quotes: `markdown_features: "-smart"` is ordinary YAML.
+case $mf in
+	\"*\") mf=${mf#\"}; mf=${mf%\"} ;;
+	"'"*"'") mf=${mf#"'"}; mf=${mf%"'"} ;;
+esac
+
+if [ -n "$mf" ]; then
+	case $mf in
+		+*|-*) FORMAT="$PFM_FORMAT$mf" ;;
+		*)     FORMAT="$mf" ;;
+	esac
 fi
 
 # Markdown -> HTML.

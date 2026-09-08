@@ -131,35 +131,159 @@ const FALLBACK_TMPL = `<!DOCTYPE html>
 // there for a document that would rather not have the ambiguity at all.
 const FEATURE_PARSERS = new Map();
 
-function parserFor(featureList) {
-  const wanted = ` ${featureList} `;
-  const autoFigure = wanted.includes(' auto_figure ')
-                  && !wanted.includes(' no_auto_figure ');
-  const math = !wanted.includes(' no_math ');
-  const key = `${autoFigure ? 'figure' : 'plain'}:${math ? 'math' : 'nomath'}`;
+// pdfulator-flavoured Markdown, as an extension set rather than a plugin list.
+//
+// PFM is `commonmark_x` -- pandoc's curated CommonMark superset. Naming it
+// that way makes the dialect a specification someone can check a document
+// against, and makes the pandoc engines the reference implementation rather
+// than the odd ones out: they get this by passing the string to `pandoc -f`,
+// while this engine has to assemble the equivalent out of markdown-it plugins.
+//
+// implicit_figures is deliberately NOT in the baseline, though commonmark_x
+// can turn it on and an earlier draft of PFM included it. The plugin wraps ANY
+// lone image, and markdown-it parses raw HTML opaquely -- so an image inside a
+// hand-written <figure> gets a second, nested one with the alt text repeated
+// as a visible caption. A caption carrying markup, or two plates under one
+// caption, can only be written as raw HTML, so those documents cannot avoid
+// it. Opt in with `markdown_features: +implicit_figures`.
+//
+// The gap is real and is not hidden. Everything commonmark_x turns on that
+// this engine cannot yet do is listed in UNSUPPORTED below, and asking for one
+// is reported rather than silently ignored. See DIALECT.md for the table.
+const PFM_FORMAT = 'commonmark_x';
 
+// What commonmark_x enables by default (pandoc 3.1.11.1), and what this engine
+// does about each. `true` means implemented; a string names it as a known gap.
+const COMMONMARK_X = {
+  alerts:                     'no markdown-it plugin wired up yet',
+  attributes:                 'no markdown-it plugin wired up yet',
+  bracketed_spans:            'no markdown-it plugin wired up yet',
+  definition_lists:           true,
+  emoji:                      'no markdown-it plugin wired up yet',
+  fancy_lists:                'no markdown-it plugin wired up yet',
+  fenced_divs:                'no markdown-it plugin wired up yet',
+  footnotes:                  true,
+  gfm_auto_identifiers:       'no markdown-it plugin wired up yet',
+  implicit_header_references: 'no markdown-it plugin wired up yet',
+  pipe_tables:                true,
+  raw_attribute:              'no markdown-it plugin wired up yet',
+  raw_html:                   true,
+  smart:                      true,
+  strikeout:                  true,
+  subscript:                  'no markdown-it plugin wired up yet',
+  superscript:                'no markdown-it plugin wired up yet',
+  task_lists:                 true,
+  tex_math_dollars:           true,
+  yaml_metadata_block:        true,
+};
+
+// Extensions pandoc knows that are OFF in commonmark_x. Only the ones this
+// engine can actually act on are listed; the rest reach reportUnsupported.
+const OPTIONAL = {
+  implicit_figures: true,
+};
+
+// Parse pandoc's extension grammar into a set of enabled extension names.
+//
+//   markdown_features: -smart              relative: PFM, minus smart
+//   markdown_features: commonmark_x-smart  absolute: names its own base
+//   (absent)                               PFM as-is
+//
+// A value starting with + or - is relative and is appended to PFM; anything
+// else replaces it. Same rule as the pandoc engines, so one document means one
+// dialect whichever engine renders it.
+function resolveFeatures(markdownFeatures) {
+  const raw = String(markdownFeatures || '').trim();
+  const spec = !raw ? PFM_FORMAT
+             : /^[+-]/.test(raw) ? PFM_FORMAT + raw
+             : raw;
+
+  const base = spec.split(/[+-]/)[0];
+  const on = new Set();
+
+  // Only commonmark_x is understood as a base. Another one is not an error
+  // here -- pandoc would accept it and this engine cannot -- so it is reported
+  // and treated as commonmark_x, which is the closest thing available.
+  const unknownBase = base !== 'commonmark_x' ? base : null;
+  for (const [ext, supported] of Object.entries(COMMONMARK_X)) {
+    if (supported === true) on.add(ext);
+  }
+
+  const asked = [];
+  for (const m of spec.slice(base.length).matchAll(/([+-])([a-z_0-9]+)/g)) {
+    asked.push(m[2]);
+    if (m[1] === '+') on.add(m[2]); else on.delete(m[2]);
+  }
+
+  // What was asked for that this engine cannot do. Two kinds: an extension
+  // commonmark_x has that is not implemented here, and one nobody has heard
+  // of. Both are worth saying out loud -- a dialect flag that silently does
+  // nothing is how a document comes out wrong with no indication why.
+  const gaps = [];
+  for (const ext of on) {
+    if (COMMONMARK_X[ext] === true || OPTIONAL[ext] === true) continue;
+    gaps.push(`${ext} (${COMMONMARK_X[ext] || 'not a commonmark_x extension'})`);
+  }
+
+  return { on, gaps, unknownBase, spec, asked };
+}
+
+function reportFeatureGaps({ gaps, unknownBase, spec }) {
+  if (unknownBase) {
+    console.error(`vivlio: markdown_features names the base "${unknownBase}", `
+                + `which this engine does not implement; using commonmark_x.`);
+  }
+  for (const gap of gaps.sort()) {
+    console.error(`vivlio: ${spec} asks for ${gap}`);
+  }
+}
+
+function parserFor(markdownFeatures, layoutFeatures) {
+  const resolved = resolveFeatures(markdownFeatures);
+  const { on } = resolved;
+
+  // Layout features are a separate axis: they say how the page should look,
+  // not what the markup means. auto_figure is accepted here as the older
+  // spelling of implicit_figures, which is where it properly belongs.
+  const layout = ` ${layoutFeatures || ''} `;
+  if (layout.includes(' auto_figure ')) on.add('implicit_figures');
+  if (layout.includes(' no_auto_figure ')) on.delete('implicit_figures');
+  if (layout.includes(' no_math ')) on.delete('tex_math_dollars');
+
+  const key = [...on].sort().join(',');
   let parser = FEATURE_PARSERS.get(key);
   if (parser) return parser;
 
-  parser = new MarkdownIt({ html: true, linkify: true, typographer: false })
-    .use(mdDeflist)
-    .use(mdTaskLists, { enabled: true })
-    .use(mdFootnote);
+  reportFeatureGaps(resolved);
 
-  // BOTH size syntaxes, and this registration order is load-bearing.
-  // `=400x300` after the URL is the de-facto convention (GitLab, Typora and
-  // others); `![alt =400x300](f.jpg)` is what this plugin's maintained export
-  // reads. Registering imgSize first makes the legacy form fail in the worst
-  // way -- the `=400x300` survives into the alt text and therefore into the
-  // caption. legacyImgSize first, then imgSize, and both spellings resolve.
-  if (autoFigure) parser = parser.use(mdFigure);
+  parser = new MarkdownIt({
+    html: on.has('raw_html'),
+    linkify: true,
+    typographer: on.has('smart'),
+  });
+
+  if (on.has('definition_lists')) parser = parser.use(mdDeflist);
+  if (on.has('task_lists'))       parser = parser.use(mdTaskLists, { enabled: true });
+  if (on.has('footnotes'))        parser = parser.use(mdFootnote);
+  if (on.has('implicit_figures')) parser = parser.use(mdFigure);
+
+  // Image sizing is not a commonmark_x extension -- pandoc spells it with
+  // `+attributes`, as `![a](f.png){width=400}`. These two spellings are
+  // pdfulator's own, and are always on: adding width/height to an <img>
+  // cannot change a document's structure.
+  //
+  // The registration order is load-bearing. `=400x300` after the URL is the
+  // de-facto convention (GitLab, Typora); `![alt =400x300](f.jpg)` is what
+  // this plugin's maintained export reads. Registering imgSize first makes
+  // the legacy form fail in the worst way -- the `=400x300` survives into the
+  // alt text and therefore into the caption.
   parser = parser.use(mdImgSizeLegacy).use(mdImgSize);
 
   // `throwOnError: false` renders a malformed expression in red rather than
   // aborting the document. A typo in one formula should cost that formula, not
   // the whole conversion -- the same reasoning as a missing image not being
   // fatal.
-  if (math) {
+  if (on.has('tex_math_dollars')) {
     parser = parser.use(mdKatex, {
       delimiters: 'dollars',
       throwOnError: false,
@@ -170,6 +294,7 @@ function parserFor(featureList) {
   FEATURE_PARSERS.set(key, parser);
   return parser;
 }
+
 
 function parseFrontMatter(source) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(\r?\n|$)/);
@@ -206,10 +331,19 @@ function normaliseMeta(raw) {
     }
   }
 
-  // Flatten pdfulator_features
-  if (Array.isArray(meta.pdfulator_features)) {
-    meta.pdfulator_features = meta.pdfulator_features.join(' ');
+  // Layout features. `layout_features` is the name; `pdfulator_features` is
+  // the older one and still works, because documents in the wild use it and
+  // breaking them to rename a key would be a poor trade. The split is what the
+  // rename is for: `layout_features` says how the page should LOOK, while
+  // `markdown_features` says what the MARKUP MEANS, and conflating the two
+  // under one key left no room for the second.
+  if (meta.layout_features == null && meta.pdfulator_features != null) {
+    meta.layout_features = meta.pdfulator_features;
   }
+  for (const k of ['layout_features', 'markdown_features']) {
+    if (Array.isArray(meta[k])) meta[k] = meta[k].join(' ');
+  }
+  meta.pdfulator_features = meta.layout_features || '';
 
   // Normalise project/product aliases
   meta.project = meta.project || meta.product || meta.productname || '';
@@ -338,12 +472,15 @@ function buildHtml(mdSource, inputBase, payloadDir, extraCss) {
   // This used to read a `theme.yaml` at the payload root -- a filename nothing
   // declared and no shipped theme had, and the last by-name lookup left in this
   // file.
-  if (!meta.pdfulator_features) {
+  if (!meta.layout_features) {
     const themeFeatures = features(payloadDir);
-    if (themeFeatures) meta.pdfulator_features = themeFeatures;
+    if (themeFeatures) {
+      meta.layout_features = themeFeatures;
+      meta.pdfulator_features = themeFeatures;
+    }
   }
 
-  const parser = parserFor(meta.pdfulator_features || '');
+  const parser = parserFor(meta.markdown_features, meta.layout_features);
   const renderedBody = parser.render(body);
 
   // The structural file, named by the payload's own template.conf rather than
@@ -376,7 +513,10 @@ function buildHtml(mdSource, inputBase, payloadDir, extraCss) {
     date: formatDate(meta.date),
     css: extraCss || meta.css || '',
     stylesheets: linkTags(payloadDir),
-    pdfulator_features: meta.pdfulator_features || '',
+    // Still `pdfulator_features` in the template context: it becomes the
+    // <body> class list, and renaming it would break every theme's CSS
+    // selectors for no gain the reader can see.
+    pdfulator_features: meta.layout_features || '',
   };
 
   return Mustache.render(tmpl, ctx);
