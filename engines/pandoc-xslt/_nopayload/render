@@ -119,11 +119,13 @@ fi
 # from the string because commonmark_x already has them on; -raw_html is
 # dropped because it is a no-op (verified on pandoc 3.1.11.1).
 #
-# Raw HTML is nonetheless the one place this engine genuinely cannot follow the
-# dialect: the target is DocBook, and an <img> or <figure> written in HTML has
-# no DocBook equivalent for pandoc to emit, so it is dropped whatever this
-# string says. That is a real gap in the parity table rather than something to
-# paper over here.
+# Raw HTML is where this engine cannot follow the dialect, and it fails in both
+# directions rather than one. A block-level <figure> is DROPPED -- there is no
+# DocBook element for it -- so a hand-written figure loses its wrapper and its
+# caption. An inline <b> is PASSED THROUGH into the DocBook verbatim, where it
+# is not valid DocBook at all, and reaches the XSL-FO stage as an element the
+# stylesheet has no template for. Neither is reported. Measured on pandoc
+# 3.1.11.1; see the raw_html row in DIALECT.md.
 # shellcheck disable=SC2086
 pandoc "$WORK/$leaf.md" \
 	-f commonmark_x \
