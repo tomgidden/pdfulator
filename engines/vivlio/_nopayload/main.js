@@ -44,6 +44,13 @@ import { figure as mdFigure } from '@mdit/plugin-figure';
 import { imgSize as mdImgSize, legacyImgSize as mdImgSizeLegacy }
   from '@mdit/plugin-img-size';
 import { katex as mdKatex } from '@mdit/plugin-katex';
+import { attrs as mdAttrs } from '@mdit/plugin-attrs';
+import { sub as mdSub } from '@mdit/plugin-sub';
+import { sup as mdSup } from '@mdit/plugin-sup';
+import { alert as mdAlert } from '@mdit/plugin-alert';
+import { anchor as mdAnchor } from '@mdit/plugin-anchor';
+import { container as mdContainer } from '@mdit/plugin-container';
+import { full as mdEmoji } from 'markdown-it-emoji';
 import yaml from 'js-yaml';
 import Mustache from 'mustache';
 import puppeteer from 'puppeteer-core';
@@ -155,23 +162,23 @@ const PFM_FORMAT = 'commonmark_x';
 // What commonmark_x enables by default (pandoc 3.1.11.1), and what this engine
 // does about each. `true` means implemented; a string names it as a known gap.
 const COMMONMARK_X = {
-  alerts:                     'no markdown-it plugin wired up yet',
-  attributes:                 'no markdown-it plugin wired up yet',
-  bracketed_spans:            'no markdown-it plugin wired up yet',
+  alerts:                     true,
+  attributes:                 true,
+  bracketed_spans:            'no plugin creates a <span> from [text]{.cls}',
   definition_lists:           true,
-  emoji:                      'no markdown-it plugin wired up yet',
-  fancy_lists:                'no markdown-it plugin wired up yet',
-  fenced_divs:                'no markdown-it plugin wired up yet',
+  emoji:                      true,
+  fancy_lists:                'markdown-it renumbers (a) (b) as an ordinary list',
+  fenced_divs:                true,
   footnotes:                  true,
-  gfm_auto_identifiers:       'no markdown-it plugin wired up yet',
-  implicit_header_references: 'no markdown-it plugin wired up yet',
+  gfm_auto_identifiers:       true,
+  implicit_header_references: 'depends on gfm_auto_identifiers; untested',
   pipe_tables:                true,
-  raw_attribute:              'no markdown-it plugin wired up yet',
+  raw_attribute:              'no markdown-it equivalent',
   raw_html:                   true,
   smart:                      true,
   strikeout:                  true,
-  subscript:                  'no markdown-it plugin wired up yet',
-  superscript:                'no markdown-it plugin wired up yet',
+  subscript:                  true,
+  superscript:                true,
   task_lists:                 true,
   tex_math_dollars:           true,
   yaml_metadata_block:        true,
@@ -266,6 +273,39 @@ function parserFor(markdownFeatures, layoutFeatures) {
   if (on.has('task_lists'))       parser = parser.use(mdTaskLists, { enabled: true });
   if (on.has('footnotes'))        parser = parser.use(mdFootnote);
   if (on.has('implicit_figures')) parser = parser.use(mdFigure);
+  if (on.has('subscript'))        parser = parser.use(mdSub);
+  if (on.has('superscript'))      parser = parser.use(mdSup);
+  if (on.has('emoji'))            parser = parser.use(mdEmoji);
+  if (on.has('alerts'))           parser = parser.use(mdAlert);
+
+  // `attributes` covers `# H {#id}`, `para {.cls}` and `![a](f.png){width=400}`
+  // -- the last being pandoc's own spelling of image sizing, and the one to
+  // prefer over the two `=400x300` forms below now that it works here.
+  //
+  // It does NOT give `bracketed_spans`: `[text]{.cls}` attaches the class to
+  // the paragraph rather than creating a <span>, because no markdown-it plugin
+  // creates an element out of bare brackets. Inline attributes on an element
+  // that already exists (`*em*{.cls}`) do work.
+  if (on.has('attributes')) parser = parser.use(mdAttrs);
+
+  // gfm_auto_identifiers: a heading gets an id derived from its text, which is
+  // what makes `[see](#my-heading)` resolve. `permalink: false` because a
+  // printed page has nowhere to click an anchor link to.
+  if (on.has('gfm_auto_identifiers')) {
+    parser = parser.use(mdAnchor, { permalink: false });
+  }
+
+  // fenced_divs: `::: warning` ... `:::`. pandoc allows any name and puts it on
+  // the <div> as a class; this plugin takes one name per registration, so the
+  // set below is what a theme can style. A name outside it stays literal text
+  // rather than becoming an unstyled div, which is the visible failure rather
+  // than the silent one.
+  if (on.has('fenced_divs')) {
+    for (const name of ['note', 'warning', 'tip', 'caution', 'important',
+                        'info', 'danger', 'example', 'quote']) {
+      parser = parser.use(mdContainer, { name });
+    }
+  }
 
   // Image sizing is not a commonmark_x extension -- pandoc spells it with
   // `+attributes`, as `![a](f.png){width=400}`. These two spellings are

@@ -5,15 +5,22 @@
     "": {
       "name": "pdfulator-engine-vivlio",
       "dependencies": {
+        "@mdit/plugin-alert": "^2.0.1",
+        "@mdit/plugin-anchor": "^2.2.0",
+        "@mdit/plugin-attrs": "^1.3.1",
+        "@mdit/plugin-container": "^2.0.1",
         "@mdit/plugin-figure": "^1.2.0",
         "@mdit/plugin-footnote": "^1.1.0",
         "@mdit/plugin-img-size": "^1.1.0",
         "@mdit/plugin-katex": "^1.1.0",
+        "@mdit/plugin-sub": "^1.1.1",
+        "@mdit/plugin-sup": "^1.1.1",
         "@puppeteer/browsers": "^2.3.0",
         "@vivliostyle/viewer": "^2.0.0",
         "js-yaml": "^4.1.0",
         "markdown-it": "^14.0.0",
         "markdown-it-deflist": "^3.0.0",
+        "markdown-it-emoji": "^3.1.0",
         "markdown-it-task-lists": "^2.1.1",
         "mustache": "^4.2.0",
         "puppeteer-core": "^22.0.0",
@@ -21,7 +28,15 @@
     },
   },
   "packages": {
-    "@mdit/helper": ["@mdit/helper@1.1.0", "", { "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-IWOUioaLobXA4ueulPfJopKaOHEGAH2pYDyK3u0cy4ItzxHXFssIJYksvdhUOC4JSHWfSjCArw41LBQdKOgFiw=="],
+    "@mdit/helper": ["@mdit/helper@1.1.1", "", { "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-Rrl14ZjFerzfAqCt0zxAWbPgRpsumgm9iBLrCVE05WS8dM6v/LnF1ppPFVnRz1F7fAaxn0kTFOlYwzcY+kRsHQ=="],
+
+    "@mdit/plugin-alert": ["@mdit/plugin-alert@2.0.1", "", { "dependencies": { "@mdit/helper": "1.1.1" }, "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-aWAjNZWQlXfCYUmTJvE+uWV0XZSz7SFcrI8N9Iq78XDZ3E/lEZo2apf9V5Nlbtc8cbda16fM9kx11GYwZlCSzw=="],
+
+    "@mdit/plugin-anchor": ["@mdit/plugin-anchor@2.2.0", "", { "dependencies": { "@mdit/helper": "1.1.1" }, "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-VsgW/3LETW+u30CE6+mhrQg4fbCPVn0IfQAHRILJA6DDT8UkLKCI4WmC3hORYiRqbaw3DY4duVwMWYECEGpsMg=="],
+
+    "@mdit/plugin-attrs": ["@mdit/plugin-attrs@1.3.1", "", { "dependencies": { "@mdit/helper": "1.1.1" }, "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-PNW2PiQ1PIWHVYqJWVW+IKjMoYpTq6M9vWuyWnE9AZbkTh16KFDhfNgs0xUTtTQAIfI1jGN4IFQ46pvZowEEzQ=="],
+
+    "@mdit/plugin-container": ["@mdit/plugin-container@2.0.1", "", { "dependencies": { "@mdit/helper": "1.1.1" }, "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-Heb0mQRy7AI46Szw1X/rqk2W7QJfVzJp08e2RRr41uN5eMuDFHXjpG/Fb3ywaTI7aw/MD4Q57Mug3hBKf5oZDA=="],
 
     "@mdit/plugin-figure": ["@mdit/plugin-figure@1.2.0", "", { "dependencies": { "@mdit/helper": "1.1.0" }, "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-seNlrG9p1czrGFfid9lXt0+YZSen+Mrdjjo+UpHUKEXme0Ha27XN7kCCxXHmigU1Zmj24UJ0mXWSBIMDmjesgA=="],
 
@@ -29,7 +44,13 @@
 
     "@mdit/plugin-img-size": ["@mdit/plugin-img-size@1.1.0", "", { "dependencies": { "@mdit/helper": "1.1.0" }, "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-eq+J1iUH5bpg76tA/DNoqY9/5/5QhbERRX41RNQxiQ/6wS/PJPNtGKB0Q1yaSTTcGlbCzO9s4fwkBivniRafhQ=="],
 
+    "@mdit/plugin-inline-rule": ["@mdit/plugin-inline-rule@2.2.1", "", { "dependencies": { "@mdit/helper": "1.1.1" }, "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-abU4gF31O9qhh0SGGfD/maoI8vPCt1oZ1VSho/TAs21eKeEUqQjXfgv2Y9dW7SY8zeZbHdxHze1bzvnOh1Rk2g=="],
+
     "@mdit/plugin-katex": ["@mdit/plugin-katex@1.1.0", "", { "dependencies": { "@mdit/helper": "1.1.0", "@mdit/plugin-tex": "1.1.0", "katex": "^0.18.4" }, "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-/YGaXjDg3Xf88Xb8YtX1WgvfBAuMdSxAlbPE1s4d7NIRNzb8/RlWlQglNODOvTrye0RZgWz4Ep4mxH4A+pynwg=="],
+
+    "@mdit/plugin-sub": ["@mdit/plugin-sub@1.1.1", "", { "dependencies": { "@mdit/helper": "1.1.1", "@mdit/plugin-inline-rule": "2.2.1" }, "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-7hqeZQPP2MJCT7YR3UsYdspBwZ0uPu7eLY9UCQssTvOD8V3lkp/Xi8vQ4xxz7pfhcLGJwsBG7pMRw07aBTkcqA=="],
+
+    "@mdit/plugin-sup": ["@mdit/plugin-sup@1.1.1", "", { "dependencies": { "@mdit/helper": "1.1.1", "@mdit/plugin-inline-rule": "2.2.1" }, "peerDependencies": { "markdown-it": "^15.0.1" }, "optionalPeers": ["markdown-it"] }, "sha512-IW2CS9naSf0k/H9YZJ0z1O+F/Ls7vgMZOvW97TXeyJ3dyP6xt36RXqbsQSJBG42fZVmAjSHUbxDgbplDV8TSpQ=="],
 
     "@mdit/plugin-tex": ["@mdit/plugin-tex@1.1.0", "", { "dependencies": { "@mdit/helper": "1.1.0" }, "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-rKQ0D5+PHE7d78aTvy1XNukPonXEHbo3Ca7NilIJmIUDfZACnatZ060t8Cjqnw/ajJyk+X+Ukv1p/ByeIPC3rg=="],
 
@@ -153,6 +174,8 @@
 
     "markdown-it-deflist": ["markdown-it-deflist@3.0.1", "", {}, "sha512-pPtXxihDMi9jrwLLQ+Jra/FM20F/FFJWiVjXf0Js6Lwp7LFj+MuK6cUJNMVTRL+n9d/JqF4MEqYZwSMgVodK5g=="],
 
+    "markdown-it-emoji": ["markdown-it-emoji@3.1.0", "", {}, "sha512-NhmMEH2ywduD4Nty1E8uB5NqfLhAT1VR0dyvoJyStKOqCzbZmVdn/+8wj7zpDsb/fLBikpCPsWwxqKlvMmbz4g=="],
+
     "markdown-it-task-lists": ["markdown-it-task-lists@2.1.1", "", {}, "sha512-TxFAc76Jnhb2OUu+n3yz9RMu4CwGfaT788br6HhEDlvWfdeJcLUsxk1Hgw2yJio0OXsxv7pyIPmvECY7bMbluA=="],
 
     "mdurl": ["mdurl@2.1.0", "", {}, "sha512-1+HBaOx0zi/dQWht8rNv9MYf9qqpqL/kxI0hXImU6Y547zM6Sni8BQibt7ifgMcYtQg41ao3Ivd6cnSM86inpg=="],
@@ -238,6 +261,16 @@
     "yauzl": ["yauzl@2.10.0", "", { "dependencies": { "buffer-crc32": "~0.2.3", "fd-slicer": "~1.1.0" } }, "sha512-p4a9I6X6nu6IhoGmBqAcbJy1mlC4j27vEPZX9F4L4/vZT3Lyq1VkFHw/V/PUcB9Buo+DG3iHkT0x3Qya58zc3g=="],
 
     "zod": ["zod@3.23.8", "", {}, "sha512-XBx9AXhXktjUqnepgTiE5flcKIYWi/rme0Eaj+5Y0lftuGBq+jyRu/md4WnuxqgP1ubdpNCsYEYPxrzVHD8d6g=="],
+
+    "@mdit/plugin-figure/@mdit/helper": ["@mdit/helper@1.1.0", "", { "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-IWOUioaLobXA4ueulPfJopKaOHEGAH2pYDyK3u0cy4ItzxHXFssIJYksvdhUOC4JSHWfSjCArw41LBQdKOgFiw=="],
+
+    "@mdit/plugin-footnote/@mdit/helper": ["@mdit/helper@1.1.0", "", { "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-IWOUioaLobXA4ueulPfJopKaOHEGAH2pYDyK3u0cy4ItzxHXFssIJYksvdhUOC4JSHWfSjCArw41LBQdKOgFiw=="],
+
+    "@mdit/plugin-img-size/@mdit/helper": ["@mdit/helper@1.1.0", "", { "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-IWOUioaLobXA4ueulPfJopKaOHEGAH2pYDyK3u0cy4ItzxHXFssIJYksvdhUOC4JSHWfSjCArw41LBQdKOgFiw=="],
+
+    "@mdit/plugin-katex/@mdit/helper": ["@mdit/helper@1.1.0", "", { "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-IWOUioaLobXA4ueulPfJopKaOHEGAH2pYDyK3u0cy4ItzxHXFssIJYksvdhUOC4JSHWfSjCArw41LBQdKOgFiw=="],
+
+    "@mdit/plugin-tex/@mdit/helper": ["@mdit/helper@1.1.0", "", { "peerDependencies": { "markdown-it": "^15.0.0" }, "optionalPeers": ["markdown-it"] }, "sha512-IWOUioaLobXA4ueulPfJopKaOHEGAH2pYDyK3u0cy4ItzxHXFssIJYksvdhUOC4JSHWfSjCArw41LBQdKOgFiw=="],
 
     "puppeteer-core/@puppeteer/browsers": ["@puppeteer/browsers@2.3.0", "", { "dependencies": { "debug": "^4.3.5", "extract-zip": "^2.0.1", "progress": "^2.0.3", "proxy-agent": "^6.4.0", "semver": "^7.6.3", "tar-fs": "^3.0.6", "unbzip2-stream": "^1.4.3", "yargs": "^17.7.2" }, "bin": { "browsers": "lib/cjs/main-cli.js" } }, "sha512-ioXoq9gPxkss4MYhD+SFaU9p1IHFUX0ILAWFPyjGaBdjLsYAlZw6j1iLA0N/m12uVHLFDfSYNF7EQccjinIMDA=="],
   }

@@ -156,6 +156,58 @@ check "wrong arity exits 2" "2" \
       "$("$ENGINE" in.md out.pdf >/dev/null 2>&1; echo $?)"
 
 
+echo "============ COMMONMARK_X EXTENSIONS ============"
+# PFM is commonmark_x (DIALECT.md), and this engine has to assemble it out of
+# markdown-it plugins rather than passing a string to pandoc. These assert the
+# ones added by wiring plugins in; the gaps are listed in DIALECT.md rather
+# than tested here, because a gap is not a behaviour.
+#
+# Asserted on the internal link annotations and drawing operators the
+# constructs produce, since PDF text is glyph-encoded and cannot be grepped.
+fixture
+cat > ext.md <<'MD'
+## My Heading
+
+Water is H~2~O and squares are x^2^.
+
+See [the heading](#my-heading).
+MD
+"$ENGINE" ext.md ext.pdf "$THEME" >/dev/null 2>&1
+check "an internal link to a generated heading id resolves" "yes" \
+      "$([ "$(grep -ac '/Link' ext.pdf)" -gt 0 ] && echo yes || echo no)"
+
+# gfm_auto_identifiers is NOT asserted through the PDF, and the reason is worth
+# recording because two plausible assertions were tried and both were wrong.
+#
+#   - the /Link annotation count: Chromium emits one for `#my-heading` whether
+#     or not anything has that id, so it is identical either way.
+#   - comparing rendered PDFs with the extension on and off: an `id` attribute
+#     has no visual effect, so the two are byte-identical. Disabling the plugin
+#     outright -- the mutation this was meant to catch -- changed nothing.
+#
+# The extension is real (`<h2 id="my-heading">` versus `<h2>`) but its effect
+# lives in the HTML, and this suite only sees PDFs. Asserting it belongs
+# wherever the engine's HTML is testable, not here. Left untested deliberately
+# rather than covered by a check that cannot fail.
+
+# An unknown extension is reported rather than silently ignored -- a dialect
+# flag that does nothing is how a document comes out wrong with no indication
+# why.
+fixture
+cat > bogus.md <<'MD'
+---
+markdown_features: +no_such_extension
+---
+
+Text.
+MD
+"$ENGINE" bogus.md bogus.pdf "$THEME" 2>"$BASE/err" >/dev/null
+check "an unknown extension is reported" "yes" \
+      "$(grep -q 'no_such_extension' "$BASE/err" && echo yes || echo no)"
+check "and the document still renders" "yes" \
+      "$(is_pdf bogus.pdf && echo yes || echo no)"
+
+
 echo "============ MATHS ============"
 # `$x$` is rendered by KaTeX at parse time -- no script in the page, no
 # network, so nothing to race and nothing to 404. The assertion is on the
