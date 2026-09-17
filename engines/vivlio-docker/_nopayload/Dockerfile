@@ -78,11 +78,19 @@ COPY themes         ./themes
 COPY templates      ./templates
 COPY themes/default ./payload
 
-# The engine: main.js and the modules it imports. payload.js reads a staged
-# payload's conf files, and is a separate file rather than part of main.js
-# because it is the one piece a future engine in this ecosystem would share.
-COPY engines/vivlio/_nopayload/main.js    ./
-COPY engines/vivlio/_nopayload/payload.js ./
+# The engine: main.js and the modules it imports.
+#
+# payload.js reads a staged payload's conf files. markdown.js is everything
+# from Markdown to filled-in HTML -- the dialect, the plugins, frontmatter and
+# the Mustache template -- and is shared with the `pagedjs` engine, which
+# differs from this one only in the paginator. Both are separate files rather
+# than part of main.js precisely because another engine uses them.
+#
+# Missing one of these is a runtime failure, not a build one: the image builds
+# happily and the engine dies on an unresolved import at the first conversion.
+COPY engines/vivlio/_nopayload/main.js     ./
+COPY engines/vivlio/_nopayload/markdown.js ./
+COPY engines/vivlio/_nopayload/payload.js  ./
 
 # Where the wrapper mounts things. Created here, and owned by the runtime user,
 # so that a container writing an output file into /out can do so without the
