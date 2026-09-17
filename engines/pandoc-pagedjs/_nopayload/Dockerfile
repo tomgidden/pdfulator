@@ -8,11 +8,30 @@
 # because it needs the themes/ directory from above the engine
 # directory.
 #
-# node rather than a plain Debian base because Paged.js is the awkward
-# dependency: pandoc and Chromium are both good Debian packages, and
-# pagedjs-cli is not packaged at all. Starting from node makes the hard one
-# easy and the easy ones no harder -- v1's reasoning, and still right.
-FROM node:slim
+# Three upstream images, each supplying the one thing it is good at, rather
+# than one base and an apt list.
+#
+# v1 started from node:slim and apt-installed chromium and pandoc, on the
+# reasoning that pagedjs-cli is the awkward dependency and the other two are
+# good Debian packages. They are -- but Debian's `chromium` drags in a GPU
+# stack a headless PDF pipeline never touches (libllvm19 124MB,
+# mesa-libgallium 41MB, on top of chromium's own 307MB), and that made the
+# browser the expensive half of an image built to make pagedjs-cli easy.
+#
+# So the browser is the base now and the other two are copied onto it:
+#
+#   chromedp/headless-shell  chrome-headless-shell on Debian trixie, no GPU
+#                            stack. The same browser the BUNDLED engine
+#                            downloads, so the two no longer merely both render.
+#   pandoc/minimal:static    one statically-linked binary, no runtime deps.
+#   node:slim                node and npm, for pagedjs-cli.
+#
+# All three are multi-arch (linux/amd64 and linux/arm64), which is a hard
+# requirement: CI builds both.
+FROM pandoc/minimal:latest-static AS pandoc
+FROM node:slim AS node
+
+FROM chromedp/headless-shell:latest
 
 LABEL maintainer="tom@gidden.net"
 LABEL org.opencontainers.image.title="PDFulator (pandoc-pagedjs engine)"
@@ -36,18 +55,26 @@ LABEL org.opencontainers.image.license="MIT"
 # Also dropped: the Google Chrome apt repository. v1 added the signing key and
 # source list and then installed Debian's own `chromium` anyway, so the repo
 # contributed a key, a fetch and a second `apt-get update` to no effect.
+# Two apt packages, and both are needed by something copied in rather than by
+# this image's own base: ca-certificates so npm can reach the registry, and
+# libatomic1 because node links against libatomic.so.1, which chromedp's image
+# does not ship. Without it `node --version` fails with a shared-library error
+# and the npm install below exits 127.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates \
-      chromium \
-      pandoc \
+ && apt-get install -y --no-install-recommends ca-certificates libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 
-# Paged.js drives Chromium through puppeteer, which must be told to use the
-# packaged browser rather than downloading its own at install time.
+COPY --from=pandoc /usr/local/bin/pandoc /usr/local/bin/pandoc
+COPY --from=node   /usr/local/bin/node   /usr/local/bin/node
+COPY --from=node   /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+
+# Paged.js drives the browser through puppeteer, which must be told to use the
+# one that is here rather than downloading its own at install time. The path is
+# chromedp's, not Debian's.
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV CHROME_PATH=/usr/bin/chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/headless-shell/headless-shell
+ENV CHROME_PATH=/headless-shell/headless-shell
 
 # --ignore-scripts, since the postinstall scripts here exist to fetch a browser
 # that is already present.
@@ -94,7 +121,12 @@ COPY themes/default /payload
 #
 # after the mounts are all correct, and it cannot happen in bare `docker run`
 # mode, which runs as `node` -- so only the wrapper path meets it.
-RUN mkdir -p /in /out /work \
+# chromedp/headless-shell runs as root and ships no unprivileged user, where
+# node:slim provided one. A `node` user is created here rather than dropping
+# the USER line: an engine writing into a bind-mounted /out as root leaves
+# root-owned files on the user's host.
+RUN groupadd -r node && useradd -r -g node node \
+ && mkdir -p /in /out /work \
  && chown node:node /in /out \
  && chmod 1777 /work
 

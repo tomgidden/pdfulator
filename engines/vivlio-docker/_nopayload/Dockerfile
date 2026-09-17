@@ -14,7 +14,22 @@
 # contract, not a second CLI -- which is what makes the bare-container mode and
 # the wrapper-driven mode the same code path rather than two that must agree.
 
-FROM oven/bun:1
+# The browser comes from chromedp/headless-shell rather than Debian's chromium
+# package, and bun is copied in on top of it rather than the other way round.
+#
+# Why this way round: the browser is by far the larger of the two, and Debian's
+# `chromium` drags in a GPU stack a headless PDF pipeline never touches --
+# libllvm19 (124MB) and mesa-libgallium (41MB) on top of chromium's own 307MB.
+# chromedp/headless-shell is chrome-headless-shell on Debian trixie with none
+# of that, and it is what the BUNDLED engine already downloads
+# (install-browser.js), so the containerised and bundled engines now run the
+# same browser rather than two that merely both render.
+#
+# It is multi-arch (linux/amd64 and linux/arm64), which is a hard requirement:
+# CI builds both.
+FROM oven/bun:1 AS bun
+
+FROM chromedp/headless-shell:latest
 
 LABEL maintainer="tom@gidden.net"
 LABEL org.opencontainers.image.title="PDFulator (vivlio engine)"
@@ -23,19 +38,19 @@ LABEL org.opencontainers.image.authors="Tom Gidden <tom@gidden.net>"
 LABEL org.opencontainers.image.source="https://github.com/tomgidden/pdfulator"
 LABEL org.opencontainers.image.license="MIT"
 
-# Chromium is the renderer. inotify-tools is not needed here and is not
-# installed: watch mode belongs to the wrapper, which runs on the host and
-# starts a container per conversion -- so the thing watching the files is
-# outside, watching the host's own directory. The old image shipped
-# inotify-tools because it had its own --watch; that CLI is gone.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      chromium \
- && rm -rf /var/lib/apt/lists/*
+# bun, from its official image. One binary, no apt list, no second Debian
+# release to keep in step.
+#
+# There is no `apt-get install` in this file at all any more. inotify-tools is
+# not needed -- watch mode belongs to the wrapper, which runs on the host and
+# starts a container per conversion, so the thing watching the files is outside
+# watching the host's own directory.
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
-# Tell puppeteer-core where Chromium is; never let it download its own.
+# Tell puppeteer-core where the browser is; never let it download its own.
+# The path is chromedp's, not Debian's.
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV CHROME_PATH=/usr/bin/chromium
+ENV CHROME_PATH=/headless-shell/headless-shell
 
 # The engine's dependencies, from the vivlio engine's own lockfile -- the same
 # file the bundled engine installs from, so the two cannot drift.
@@ -76,7 +91,13 @@ COPY engines/vivlio/_nopayload/payload.js ./
 #   /in       the document (read-only when the wrapper mounts it)
 #   /out      where the PDF goes
 #   /payload  the payload, when it isn't the built-in one
-RUN mkdir -p /in /out /payload && chown bun:bun /in /out /payload
+# chromedp/headless-shell runs as root and ships no unprivileged user, where
+# oven/bun provided one. A `bun` user is created here rather than dropping the
+# USER line, because an engine that writes into a bind-mounted /out as root
+# leaves root-owned files on the user's host -- which is a surprising thing for
+# a PDF conversion to leave behind.
+RUN groupadd -r bun && useradd -r -g bun bun \
+ && mkdir -p /in /out /payload && chown bun:bun /in /out /payload
 
 USER bun
 

@@ -7,6 +7,11 @@
 # this one needs nothing from above its own directory: the stylesheets are its
 # own, and its fonts arrive at run time in the payload the wrapper stages and
 # mounts, exactly as they do for the browser engines.
+# No browser here, so no chromedp base: this engine paginates with FOP, and a
+# headless Chromium would be ~250MB of nothing. Debian stays the base, and only
+# pandoc is taken from upstream.
+FROM pandoc/minimal:latest-static AS pandoc
+
 FROM debian:12-slim
 
 LABEL maintainer="tom@gidden.net"
@@ -31,10 +36,17 @@ RUN apt-get update \
       docbook-xsl \
       docbook5-xml \
       libxml2-utils \
-      pandoc \
       perl \
       xsltproc \
  && rm -rf /var/lib/apt/lists/*
+
+# pandoc from its own image rather than from apt: one statically-linked binary
+# with no runtime dependencies, and a current release (3.11) where Debian 12
+# carries 3.1.11.1. The newer one emits real MathML for `$x$` where the older
+# emitted a <span> holding the TeX as text -- which does not help THIS engine,
+# whose DocBook output drops maths either way (see DIALECT.md), but does mean
+# both pandoc engines now run the same binary rather than two releases apart.
+COPY --from=pandoc /usr/local/bin/pandoc /usr/local/bin/pandoc
 
 # Apache FOP, pinned.
 #
