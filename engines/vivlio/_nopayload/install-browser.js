@@ -39,22 +39,34 @@ async function puppeteerBrowsers() {
   return import('@puppeteer/browsers');
 }
 
-// Whether this platform has a chrome-headless-shell build at all. There is no
-// linux-arm64 one, and offering a download that can't work is a dead end.
+// Whether this platform has a chrome-headless-shell build to fetch.
+//
+// ARM Linux WORKS, and used to be refused here. The refusal was right at the
+// time but for a reason that has since been fixed upstream rather than the one
+// the comment gave: Google has published linux-arm64 builds since 2024, but
+// @puppeteer/browsers mapped BrowserPlatform.LINUX_ARM to the `linux64` folder
+// (v2.13.2), so installing on ARM downloaded the x86-64 zip and left a binary
+// that could not execute. A download that succeeds and produces a broken
+// browser is worse than one that is refused, so it was refused.
+//
+// @puppeteer/browsers 3.2.0 ("allow downloading CfT linux-arm64") fixes the
+// mapping, and this now resolves
+// .../chrome-for-testing-public/<build>/linux-arm64/chrome-headless-shell-linux-arm64.zip
+// as it should. Hence the ^3.2.0 floor in package.json: on 2.x this function
+// would hand an ARM user an x86-64 browser.
+//
+// Note v3 is ESM-only, which is why the import below is dynamic.
 function browserDownloadSupported() {
-  // Cheap structural check, matching @puppeteer/browsers' own platform matrix.
-  if (process.platform === 'linux' && process.arch !== 'x64') return false;
   return ['darwin', 'linux', 'win32'].includes(process.platform);
 }
+
 
 async function installBrowser(verbose) {
   if (!browserDownloadSupported()) {
     console.error(`\
 Error: no chrome-headless-shell build for ${process.platform}/${process.arch}.
 
-${process.platform === 'linux' && process.arch === 'arm64'
-  ? "On ARM Linux, install your distro's package instead:\n  sudo apt install chromium"
-  : 'Install a Chromium-based browser manually and set CHROME_PATH.'}
+Install a Chromium-based browser manually and set CHROME_PATH.
 `);
     process.exit(1);
   }
