@@ -1,0 +1,55 @@
+#!/bin/sh
+# The pagedjs engine's convert step.
+#
+#   convert <input|-> <output|-> <payload-dir>
+#
+# A thin shim: the work is main.js, and this exists to launch it on whichever
+# JS runtime the wrapper settled on. That choice is the wrapper's because it
+# outlives any one conversion -- it is pinned, and shared with every other JS
+# engine -- so the engine is told rather than asked to find out.
+#
+# The runtime is passed as $PDFULATOR_RUNTIME. bun and deno need a subcommand
+# before the script, and deno additionally needs permissions; node and a
+# directly-executed script need neither.
+set -eu
+
+ENGINE_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+
+# _nopayload/ is the engine's program: what it RUNS, as opposed to the
+# engine.conf and any content it declares, which are what the payload carries.
+# Keeping the two apart is what lets staging copy a whole engine directory into
+# a payload without dragging node_modules into a container mount.
+#
+# `convert` and `engine.conf` stay at the root: they are the engine's contract
+# with the wrapper, which finds them by name.
+RUN_DIR="$ENGINE_DIR/_nopayload"
+MAIN="$RUN_DIR/main.js"
+
+[ -f "$MAIN" ] || {
+	echo "pagedjs: engine is incomplete: no main.js at $MAIN" >&2
+	exit 1
+}
+
+# node_modules is the engine's own, not the distribution's: the viewer and
+# puppeteer-core are what make this engine what it is, and an engine that
+# doesn't drive a browser ships none of it.
+[ -d "$RUN_DIR/node_modules" ] || {
+	echo "pagedjs: engine dependencies are missing ($RUN_DIR/node_modules)." >&2
+	echo "Run \`pdfulator --install\` to complete the installation." >&2
+	exit 1
+}
+
+RUNTIME=${PDFULATOR_RUNTIME:-}
+[ -n "$RUNTIME" ] || {
+	echo "pagedjs: no JS runtime given (PDFULATOR_RUNTIME unset)." >&2
+	echo "Run \`pdfulator --install\` to choose one." >&2
+	exit 1
+}
+
+# `case` on the basename, so that /opt/homebrew/bin/bun and a bare `bun` are
+# treated alike, and a path merely *containing* "node" is not mistaken for one.
+case $(basename -- "$RUNTIME") in
+	bun*)  exec "$RUNTIME" run "$MAIN" "$@" ;;
+	deno*) exec "$RUNTIME" run -A "$MAIN" "$@" ;;
+	*)     exec "$RUNTIME" "$MAIN" "$@" ;;
+esac

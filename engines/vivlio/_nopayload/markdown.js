@@ -444,8 +444,13 @@ export function payloadHref(payload) {
   return p => '/payload/' + path.relative(payload, p).split(path.sep).join('/');
 }
 
+// An absolute filesystem path, for a renderer that loads the page from disk
+// rather than over HTTP. NOT a file:// URL: pagedjs-cli hands the path to a
+// browser that resolves it against the page's own location, and the legacy
+// pandoc-pagedjs engine has always passed a bare path here too -- so this
+// matches what is known to work rather than introducing a second convention.
 export function fileHref() {
-  return p => 'file://' + p;
+  return p => p;
 }
 
 function linkTags(payload, href = payloadHref(payload)) {

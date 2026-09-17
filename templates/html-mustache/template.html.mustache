@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{title}}</title>
+{{{stylesheets}}}
+</head>
+
+<body class="{{pdfulator_features}}">
+
+  <article>
+
+    <!-- RUNNING-CONTENT SLOTS.
+         Named by ROLE, not by position: a slot says what it is, and the
+         styler decides where it goes. `attribution` can sit bottom-left on
+         one theme and top-centre on another without the markup changing, and
+         nothing here has committed to a physical side -- which is what keeps
+         recto/verso and RTL open rather than needing a second set of slots.
+         CSS's sixteen margin boxes are all physical, so a positional name
+         here would have to be re-mapped by the styler anyway.
+
+         Hidden from the flow by the stylers (both already hide these), and
+         lifted into a margin box by whichever mechanism the paginator has:
+         `string-set`/`string()` for Vivliostyle, `position: running()`/
+         `element()` for Paged.js.
+
+         THE ids AND .page-* CLASSES ARE COMPATIBILITY ALIASES for the styling
+         that already targets them, and are to be removed once both stylers
+         address slots by data-slot alone. -->
+    <div class="pdfulator-slots">
+      <div class="slot page-header-left"  data-slot="running-title" id="pageHeader">{{{title}}}</div>
+      <div class="slot"                   data-slot="running-section"></div>
+      <div class="slot page-footer-left"  data-slot="attribution" id="pageFooter">{{#copyright}}<span class="footer-copyright">© {{year}} {{copyright}}</span>{{/copyright}}{{#footer}}<span class="footer-text">{{footer}}</span>{{/footer}}{{#revision}}<span class="footer-revision">{{revision}}</span>{{/revision}}{{^copyright}}{{^footer}} {{/footer}}{{/copyright}}</div>
+      <div class="slot page-footer-right" data-slot="page-number"></div>
+    </div>
+
+    <hgroup>
+      <h1 class="doc-title">{{{title}}}</h1>
+      {{#subtitle}}<p class="doc-subtitle">{{{subtitle}}}</p>{{/subtitle}}
+
+      {{#authors}}
+      <address class="doc-author">
+        <span class="author-name">{{name}}</span>{{#affiliation}}<span class="author-affiliation">{{affiliation}}</span>{{/affiliation}}{{#email}}<span class="author-email"><a href="mailto:{{email}}">{{email}}</a></span>{{/email}}
+      </address>
+      {{/authors}}
+
+      {{#project}}<div class="doc-project">{{project}}</div>{{/project}}
+      {{#date}}<time class="doc-date">{{date}}</time>{{/date}}
+      {{#revision}}<div class="doc-revision">{{revision}}</div>{{/revision}}
+    </hgroup>
+
+    <main>
+      {{{body}}}
+    </main>
+
+  </article>
+
+</body>
+</html>

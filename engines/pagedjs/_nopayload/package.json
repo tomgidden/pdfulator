@@ -1,0 +1,26 @@
+{
+  "name": "pdfulator-engine-pagedjs",
+  "version": "3.0.0",
+  "description": "pdfulator pagedjs engine: markdown-it + Mustache + Paged.js",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@mdit/plugin-alert": "^2.0.1",
+    "@mdit/plugin-anchor": "^2.2.0",
+    "@mdit/plugin-attrs": "^1.3.1",
+    "@mdit/plugin-container": "^2.0.1",
+    "@mdit/plugin-figure": "^1.2.0",
+    "@mdit/plugin-footnote": "^1.1.0",
+    "@mdit/plugin-img-size": "^1.1.0",
+    "@mdit/plugin-katex": "^1.1.0",
+    "@mdit/plugin-sub": "^1.1.1",
+    "@mdit/plugin-sup": "^1.1.1",
+    "js-yaml": "^4.1.0",
+    "markdown-it": "^14.0.0",
+    "markdown-it-deflist": "^3.0.0",
+    "markdown-it-emoji": "^3.1.0",
+    "markdown-it-task-lists": "^2.1.1",
+    "mustache": "^4.2.0",
+    "pagedjs-cli": "^0.4.3"
+  }
+}
