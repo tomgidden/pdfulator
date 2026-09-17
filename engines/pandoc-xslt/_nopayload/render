@@ -107,6 +107,40 @@ else
 			break
 		fi
 	done
+
+	# The document's siblings, so that `![](fig.svg)` resolves.
+	#
+	# The markdown is copied into the scratch directory -- which is what makes
+	# the read-only input mount viable -- so without this the DocBook holds a
+	# relative fileref with nothing beside it, and FOP reports
+	#
+	#   SEVERE: Image not found. URI: /work/pdfulator.XXXXXX/fig.svg
+	#
+	# after rendering the rest of the page perfectly. Same bug and same fix as
+	# engines/pandoc-pagedjs (593d60c); this engine never got the treatment.
+	#
+	# NOT the names this script writes: a document sits beside its own output by
+	# default, so linking a previous render's PDF in and then writing through
+	# the link would hit the read-only input mount.
+	#
+	# Failures are ignored deliberately: a name that cannot be linked is one
+	# asset missing from one document, and the rest of it is still worth
+	# rendering.
+	indir=$(dirname -- "$in")
+	if [ -d "$indir" ]; then
+		for sibling in "$indir"/* "$indir"/.[!.]*; do
+			[ -e "$sibling" ] || continue
+			name=$(basename -- "$sibling")
+			case $name in
+				"$leaf.xml"|"$leaf.fo"|"$leaf.pdf") continue ;;
+			esac
+			# `if` rather than `[ ... ] && continue`: under set -e a bare
+			# test as the last command of a loop body fails the loop.
+			if [ ! -e "$WORK/$name" ]; then
+				ln -s -- "$sibling" "$WORK/$name" 2>/dev/null || true
+			fi
+		done
+	fi
 fi
 
 # --- 1. Markdown to DocBook 5 -------------------------------------------------
