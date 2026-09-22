@@ -49,6 +49,14 @@ import { alert as mdAlert } from '@mdit/plugin-alert';
 import { anchor as mdAnchor } from '@mdit/plugin-anchor';
 import { container as mdContainer } from '@mdit/plugin-container';
 import { full as mdEmoji } from 'markdown-it-emoji';
+import mdBracketedSpans from 'markdown-it-bracketed-spans';
+// Both engines' package.json carry an `overrides` entry pinning this plugin's
+// markdown-it peer to ours, and it is load-bearing rather than tidying: the
+// plugin's declared peer caps at markdown-it 14 while the @mdit/* family wants
+// 15, so npm refuses the tree outright without it. The cap is stale -- the
+// plugin was exercised against 15 before the override was written -- but only
+// its author can lift it. Remove the override and `npm install` stops working.
+import { markdownItFancyListPlugin as mdFancyLists } from 'markdown-it-fancy-lists';
 import yaml from 'js-yaml';
 import Mustache from 'mustache';
 
@@ -149,16 +157,21 @@ const PFM_FORMAT = 'commonmark_x';
 const COMMONMARK_X = {
   alerts:                     true,
   attributes:                 true,
-  bracketed_spans:            'no plugin creates a <span> from [text]{.cls}',
+  bracketed_spans:            true,
   definition_lists:           true,
   emoji:                      true,
-  fancy_lists:                'markdown-it renumbers (a) (b) as an ordinary list',
+  fancy_lists:                true,
   fenced_divs:                true,
   footnotes:                  true,
   gfm_auto_identifiers:       true,
   implicit_header_references: 'depends on gfm_auto_identifiers; untested',
   pipe_tables:                true,
-  raw_attribute:              'no markdown-it equivalent',
+  // Not a missing plugin but a missing token: mdAttrs consumes the `{=html}`
+  // braces and discards the `=`-prefixed content, so by the time any renderer
+  // override could run there is nothing left to read -- the code span arrives
+  // with attrs null and the target gone. Closing this needs an inline rule
+  // that claims the syntax before mdAttrs eats it. Measured, not assumed.
+  raw_attribute:              'mdAttrs discards {=target}, leaving no token to render',
   raw_html:                   true,
   smart:                      true,
   strikeout:                  true,
@@ -267,10 +280,18 @@ function parserFor(markdownFeatures, layoutFeatures) {
   // -- the last being pandoc's own spelling of image sizing, and the one to
   // prefer over the two `=400x300` forms below now that it works here.
   //
-  // It does NOT give `bracketed_spans`: `[text]{.cls}` attaches the class to
-  // the paragraph rather than creating a <span>, because no markdown-it plugin
-  // creates an element out of bare brackets. Inline attributes on an element
-  // that already exists (`*em*{.cls}`) do work.
+  // On its own it does NOT give `bracketed_spans`: `[text]{.cls}` attaches the
+  // class to the paragraph rather than creating a <span>, because mdAttrs
+  // decorates elements and does not create them. Inline attributes on an
+  // element that already exists (`*em*{.cls}`) do work. The plugin below
+  // supplies the missing element.
+  // bracketed_spans: `[text]{.cls #id lang=fr}` becomes a <span> carrying the
+  // attributes. It must be registered BEFORE mdAttrs: it creates the element
+  // that mdAttrs then decorates. (Both orders happen to work today, because
+  // the plugin installs its own inline rule rather than post-processing, but
+  // the dependency is real and the order states it.)
+  if (on.has('bracketed_spans')) parser = parser.use(mdBracketedSpans);
+
   if (on.has('attributes')) parser = parser.use(mdAttrs);
 
   // gfm_auto_identifiers: a heading gets an id derived from its text, which is
@@ -291,6 +312,34 @@ function parserFor(markdownFeatures, layoutFeatures) {
       parser = parser.use(mdContainer, { name });
     }
   }
+
+  // fancy_lists: `a.` `a)` `i.` `I)` give <ol type="a"|"i"|"I">, and the first
+  // marker sets `start` -- `iv.` opens a list at 4.
+  //
+  // The plugin's three options (allowMultiLetter, allowOrdinal and its
+  // siblings) are all left OFF deliberately: with defaults it matches pandoc
+  // on every marker measured, including the ones pandoc REFUSES. `A. one` and
+  // `I. one` stay paragraphs in both, because a lone capital and a period is
+  // more often an initial ("A. Turing wrote...") than a list; turning either
+  // option on would break that agreement.
+  //
+  // Two divergences remain, and they point opposite ways:
+  //
+  //   `(a) item`  pandoc makes <ol type="a">, this leaves literal text.
+  //               Visible in the output -- you see the brackets -- so a
+  //               document written this way looks wrong here rather than
+  //               quietly rendering differently.
+  //
+  //   `#. item`   pandoc leaves literal text, this makes an <ol>. The silent
+  //               direction, and the one that matters: the document renders
+  //               as a list here and as a paragraph everywhere else. The
+  //               plugin offers no switch to suppress it -- checked against
+  //               its source, not its README -- so this is a known
+  //               divergence rather than a setting. Documents should not use
+  //               `#.` markers.
+  //
+  // Both are recorded in DIALECT.md rather than left to be found in a PDF.
+  if (on.has('fancy_lists')) parser = parser.use(mdFancyLists);
 
   // Image sizing is not a commonmark_x extension -- pandoc spells it with
   // `+attributes`, as `![a](f.png){width=400}`. These two spellings are

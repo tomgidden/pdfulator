@@ -189,6 +189,64 @@ check "an internal link to a generated heading id resolves" "yes" \
 # lives in the HTML, and this suite only sees PDFs. Asserting it belongs
 # wherever the engine's HTML is testable, not here. Left untested deliberately
 # rather than covered by a check that cannot fail.
+#
+# `bracketed_spans` is untested here for the same reason: `[text]{.cls}` makes
+# a <span> carrying a class, and a class with nothing styling it has no visual
+# effect at all. The two renders are byte-identical.
+
+# fancy_lists: `a)` numbers a list a, b, c rather than 1, 2, 3.
+#
+# Counting text operators cannot see this -- both renders draw exactly three
+# markers and three words, so the count is identical either way. The evidence
+# is WHICH glyphs are drawn: the marker positions hold the glyph ids for
+# `a b c` in one and `1 2 3` in the other, while the body copy is unchanged.
+# So the assertion is that the two glyph streams DIFFER, against a control
+# that proves the comparison can see sameness too.
+pdf_glyphs() {  # pdf_glyphs <pdf> -- the glyph ids drawn, in order
+	"$PDFULATOR_RUNTIME" -e '
+	  const fs = require("fs"), zlib = require("zlib");
+	  const buf = fs.readFileSync(process.argv[1]);
+	  let i = 0, out = [];
+	  while ((i = buf.indexOf("stream", i)) !== -1) {
+	    let s = i + 6;
+	    if (buf[s] === 13) s++;
+	    if (buf[s] === 10) s++;
+	    const e = buf.indexOf("endstream", s);
+	    if (e === -1) break;
+	    try {
+	      const o = zlib.inflateSync(buf.subarray(s, e)).toString("latin1");
+	      out.push(...(o.match(/<[0-9A-Fa-f]+>\s*Tj/g) || []));
+	    } catch (err) {}
+	    i = e + 9;
+	  }
+	  console.log(out.join(" "));
+	' "$1" 2>/dev/null
+}
+
+# A plain "the two renders differ" assertion looks right and is VACUOUS, which
+# is why the mutation was run rather than assumed. Disabling the plugin does
+# not make `a) alpha` render like `1. alpha` -- it makes it render as the
+# literal text "a)" with no list at all, which differs from the numbered list
+# too. The check would have passed with the feature switched off.
+#
+# What separates working from broken is the SHAPE. A real fancy list draws the
+# same number of pieces as the numbered list it mirrors, with one glyph
+# swapped: marker `a` for marker `1`, body copy untouched. The broken render
+# draws MORE pieces, because "a)" becomes running text that the layout splits
+# differently. So: same count as the numbered control, and a different first
+# glyph. Both halves are needed -- the count alone passes when nothing is a
+# list, and the glyph alone passes when nothing is a list either.
+fixture
+printf 'a) alpha\nb) beta\nc) gamma\n' > fancy.md
+printf '1. alpha\n2. beta\n3. gamma\n' > plainlist.md
+"$ENGINE" fancy.md     fancy.pdf     "$THEME" >/dev/null 2>&1
+"$ENGINE" plainlist.md plainlist.pdf "$THEME" >/dev/null 2>&1
+check "fancy_lists builds a list, not running text" "same-shape" \
+      "$([ "$(pdf_glyphs fancy.pdf | wc -w)" -eq "$(pdf_glyphs plainlist.pdf | wc -w)" ] \
+         && echo same-shape || echo different-shape)"
+check "and letters the marker rather than numbering it" "lettered" \
+      "$([ "$(pdf_glyphs fancy.pdf)" != "$(pdf_glyphs plainlist.pdf)" ] \
+         && echo lettered || echo numbered)"
 
 # An unknown extension is reported rather than silently ignored -- a dialect
 # flag that does nothing is how a document comes out wrong with no indication
