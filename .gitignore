@@ -15,6 +15,10 @@
 !README.pdf
 
 node_modules/
+# Never been tracked: an engine's dependencies are installed at install time
+# against whatever the user has, and a lockfile committed here would pin a
+# resolution nobody verified on their platform.
+package-lock.json
 pdfulator.tar.gz
 pdfulator.tar.gz.sha256
 .dist/
