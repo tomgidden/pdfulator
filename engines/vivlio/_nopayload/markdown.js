@@ -323,20 +323,30 @@ function parserFor(markdownFeatures, layoutFeatures) {
   // more often an initial ("A. Turing wrote...") than a list; turning either
   // option on would break that agreement.
   //
-  // Two divergences remain, and they point opposite ways:
+  // Two markers in the SPECIFICATION are handled differently by the two
+  // implementations, and the gaps are one each -- measured against the pandoc
+  // manual's definition of fancy_lists, not against pandoc's behaviour. The
+  // distinction matters: comparing engine to engine made this look like one
+  // engine's fault, and it is not.
   //
-  //   `(a) item`  pandoc makes <ol type="a">, this leaves literal text.
-  //               Visible in the output -- you see the brackets -- so a
-  //               document written this way looks wrong here rather than
-  //               quietly rendering differently.
+  //   `#. item`   IS specified ("the fancy_lists extension also allows '#'
+  //               to be used as an ordered list marker"), and this plugin
+  //               implements it. Pandoc's commonmark reader does NOT -- its
+  //               own manual carries the note "the '#' ordered list marker
+  //               doesn't work with `commonmark`". So a document using `#.`
+  //               renders as a list here and as a paragraph under the pandoc
+  //               engines, and THIS engine is the conformant one. Do not
+  //               "fix" it by suppressing the marker.
   //
-  //   `#. item`   pandoc leaves literal text, this makes an <ol>. The silent
-  //               direction, and the one that matters: the document renders
-  //               as a list here and as a paragraph everywhere else. The
-  //               plugin offers no switch to suppress it -- checked against
-  //               its source, not its README -- so this is a known
-  //               divergence rather than a setting. Documents should not use
-  //               `#.` markers.
+  //   `(a) item` IS specified too ("list markers may be enclosed in
+  //               parentheses"), and this plugin declines it -- deliberately,
+  //               per its README, because CommonMark rejects `(1)` for Arabic
+  //               numerals and the author preferred internal consistency to
+  //               matching pandoc. Bare markdown-it does leave `(1) one` as a
+  //               paragraph, so the reasoning holds. Left alone: a local rule
+  //               accepting `(a)` while `(1)` still followed CommonMark would
+  //               be less consistent than the plugin, and it fails visibly
+  //               anyway -- the brackets show up on the page.
   //
   // Both are recorded in DIALECT.md rather than left to be found in a PDF.
   if (on.has('fancy_lists')) parser = parser.use(mdFancyLists);
