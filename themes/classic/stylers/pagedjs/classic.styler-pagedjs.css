@@ -446,11 +446,26 @@ hr {
 }
 
 table {
-  margin: 1rem 0;
+  /* Matched to stylers/vivliostyle. Three things differed and all three
+     changed how the table paginated, not just how it looked:
+
+     `margin: 1rem 0` -- 1rem is the root font size (11pt, from the default
+     theme), not the theme's own scale, so the table sat on a different
+     rhythm from everything around it. var(--L) is the line grid the rest of
+     the document uses.
+
+     `display: block` -- a table that is a block is no longer a table box.
+     Rows stop being row boxes, `break-inside: avoid` means something else,
+     and the paginator is free to cut it anywhere. That is why this engine
+     split a table where vivlio moved it whole.
+
+     `overflow-x: auto` -- meaningless on paper, and it forces the block
+     display above. A table too wide for the page needs a real answer
+     (smaller type, landscape, or fewer columns), not a scrollbar that
+     cannot exist in a PDF. */
+  margin: var(--L) 0;
   border-collapse: collapse;
   width: 100%;
-  overflow-x: auto;
-  display: block;
   font-variant-numeric: lining-nums tabular-nums;
 }
 
