@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 
 
 // Everything from Markdown to filled-in HTML, imported from the vivlio
@@ -65,6 +66,25 @@ function readInput(input) {
 // Falls back to the temp directory when the document's own is not writable --
 // a read-only mount, most likely. Relative assets are then broken, but a
 // document that renders without its figures beats one that does not render.
+// pagedjs-cli is this engine's own dependency, so it is run from this engine's
+// own node_modules rather than looked up on PATH.
+//
+// Spawning the bare name `pagedjs-cli` meant the engine only worked when the
+// user happened to have it installed globally -- `pdfulator -e pagedjs` failed
+// with "not installed or not on PATH" on a machine where `pdfulator --install`
+// had done everything correctly and the binary was sitting in node_modules/.bin
+// beside this file. The `convert` shim already checks that node_modules exists;
+// it just never said where it was.
+//
+// Falls back to the bare name if the local binary is absent, which keeps a
+// global install working and keeps the ENOENT message meaningful.
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function pagedjsCliPath() {
+  const local = path.join(SCRIPT_DIR, 'node_modules', '.bin', 'pagedjs-cli');
+  return fs.existsSync(local) ? local : 'pagedjs-cli';
+}
+
 function pagedjsPdf(htmlPath, pdfPath, browserPath, verbose) {
   return new Promise((resolve, reject) => {
     const args = [
@@ -78,7 +98,8 @@ function pagedjsPdf(htmlPath, pdfPath, browserPath, verbose) {
       '--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage',
     ];
 
-    if (verbose) console.error(`pagedjs-cli ${args.join(' ')}`);
+    const cli = pagedjsCliPath();
+    if (verbose) console.error(`${cli} ${args.join(' ')}`);
 
     const env = { ...process.env };
     if (browserPath) {
@@ -86,7 +107,7 @@ function pagedjsPdf(htmlPath, pdfPath, browserPath, verbose) {
       env.CHROME_PATH = browserPath;
     }
 
-    const child = spawn('pagedjs-cli', args, {
+    const child = spawn(cli, args, {
       env,
       stdio: ['ignore', 'inherit', verbose ? 'inherit' : 'pipe'],
     });
