@@ -15,9 +15,14 @@
 !README.pdf
 
 node_modules/
-# Never been tracked: an engine's dependencies are installed at install time
-# against whatever the user has, and a lockfile committed here would pin a
-# resolution nobody verified on their platform.
+# bun.lock IS tracked, for both markdown-it engines: the vivlio-docker image
+# builds with `bun install --frozen-lockfile`, so a stale lockfile fails the
+# build rather than silently resolving something else. Change a package.json
+# here and you must re-run `bun install` and commit the lockfile with it.
+#
+# package-lock.json is the npm byproduct of doing that work with the wrong
+# tool. It is ignored so it cannot be committed alongside bun.lock, where two
+# lockfiles would be free to disagree.
 package-lock.json
 pdfulator.tar.gz
 pdfulator.tar.gz.sha256
