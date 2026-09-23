@@ -179,6 +179,18 @@ body {
   }
 }
 
+/* The template's slot elements are SOURCES for the page margins, never body
+   content. Paged.js lifts two of them with position: running(); the rest have
+   to be taken out of the flow explicitly, or a theme that fills one -- the
+   running-section slot is empty today, which is the only reason this has not
+   shown -- would have it appear as a stray line of body text here and be
+   correctly hidden under vivlio.
+
+   The vivliostyle sheet has always had this rule. */
+.pdfulator-slots .slot {
+  display: none;
+}
+
 #pageHeader {
   position: running(pageHeader);
 }
@@ -236,11 +248,17 @@ main pre {  margin-left: var(--L2); }
 .wide_pre main pre {  margin-left: 0; }
 .wide.wide_pre main pre {  margin-left: var(--L2); }
 
-footer span::after {
+/* Separators between the footer's parts. This targeted `footer span`, and
+   the template puts those spans in the attribution slot rather than a
+   <footer>, so it never matched: the parts ran together as
+   "(c) 2026 SomeoneA footer linev1.2" under BOTH engines.
+
+   Targeted by the slot that holds them, so it works wherever that slot is
+   lifted to. The spaces are non-breaking, as they were in the rule this
+   replaces -- a separator that wraps is worse than none. */
+.footer-text::before,
+.footer-revision::before {
   content: "   |  ";
-}
-footer span:last-child::after {
-  content: "";
 }
 
 /* The document header.

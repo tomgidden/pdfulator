@@ -100,6 +100,19 @@ body.footer-h4 main h4 {
   display: none;
 }
 
+/* Separators between the footer's parts. This targeted `footer span`, and
+   the template puts those spans in the attribution slot rather than a
+   <footer>, so it never matched: the parts ran together as
+   "(c) 2026 SomeoneA footer linev1.2" under BOTH engines.
+
+   Targeted by the slot that holds them, so it works wherever that slot is
+   lifted to. The spaces are non-breaking, as they were in the rule this
+   replaces -- a separator that wraps is worse than none. */
+.footer-text::before,
+.footer-revision::before {
+  content: "   |  ";
+}
+
 /* Base typography */
 
 body {
