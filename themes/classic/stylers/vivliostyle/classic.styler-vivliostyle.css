@@ -1,10 +1,19 @@
 html {
+  /* The type scale. Every step is derived from --S so that changing one value
+     rescales the document, which is what a scale is for -- these were written
+     out as literal points, and the pagedjs sheet's equivalent block had
+     already drifted to a different base without anything making that visible.
+
+     round(_, 1pt) rather than bare calc: type wants whole points. 0.85 * 12pt
+     is 10.2pt, and the literal these replaced said 10pt -- the rounding is
+     what the hand-written scale was doing, now stated rather than baked in.
+     Steps that already land on a whole point are unaffected. */
   --S: 12pt;
-  --S0-85: 10pt;
-  --S1-25: 15pt;
-  --S1-5: 18pt;
-  --S1-75: 21pt;
-  --S2: 24pt;
+  --S0-85: round(0.85 * var(--S), 1pt);
+  --S1-25: round(1.25 * var(--S), 1pt);
+  --S1-5:  round(1.5  * var(--S), 1pt);
+  --S1-75: round(1.75 * var(--S), 1pt);
+  --S2:    round(2    * var(--S), 1pt);
 
   --L: 18pt;
   --L0-5: 9pt;

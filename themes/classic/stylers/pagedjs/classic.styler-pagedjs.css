@@ -18,12 +18,22 @@
 
 
 html {
-  --S: 15pt;
-  --S2: calc(2 * var(--S));
-  --S1-75: calc(1.75 * var(--S));
-  --S1-5: calc(1.5 * var(--S));
-  --S1-25: calc(1.25 * var(--S));
-  --S0-85: calc(0.85 * var(--S));
+  /* The type scale, matching stylers/vivliostyle. It was 15pt here -- a base
+     25% larger, which made every size in a pagedjs render 1.25x its
+     vivliostyle counterpart while the text, fonts and maths were identical.
+
+     That was inherited rather than chosen: this sheet began as the
+     pandoc-pagedjs engine's print.css, styling what pandoc's template emits.
+     The `pagedjs` engine renders the shared mustache template instead, so it
+     is the same document as vivlio's and should be the same size.
+
+     round(_, 1pt) rather than bare calc -- see the vivliostyle sheet. */
+  --S: 12pt;
+  --S0-85: round(0.85 * var(--S), 1pt);
+  --S1-25: round(1.25 * var(--S), 1pt);
+  --S1-5:  round(1.5  * var(--S), 1pt);
+  --S1-75: round(1.75 * var(--S), 1pt);
+  --S2:    round(2    * var(--S), 1pt);
 
   --LL: calc(-1 * var(--L));
   --L: 18pt;
@@ -62,7 +72,11 @@ pre, code {
   font-family: var(--pdfulator-mono);
   /* font-variation-settings: "wdth" 100; */
   /* font-weight: 400; */
-  font-size: 0.85em;
+  /* var(--S0-85), not 0.85em: the scale step is an absolute size, rounded to
+     a whole point, where `em` is relative to whatever encloses it and
+     compounds for code inside a heading or a footnote. The vivliostyle sheet
+     has always used the step. */
+  font-size: var(--S0-85);
 }
 
 .strong_monospace code,
