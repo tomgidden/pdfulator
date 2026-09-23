@@ -29,3 +29,11 @@ pdfulator.tar.gz.sha256
 .dist/
 
 .version
+
+# Runtime state, written when PDFULATOR_HOME points at a working tree rather
+# than an installed copy -- which is what running from source does. lib/paths.sh
+# and lib/engines.sh put the staged payload cache and the per-engine "already
+# prepared" marks here, and `.engine` records the last engine used.
+.engine
+.prepared/
+cache/

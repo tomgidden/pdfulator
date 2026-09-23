@@ -255,17 +255,62 @@ function parserFor(markdownFeatures, layoutFeatures) {
   if (layout.includes(' no_auto_figure ')) on.delete('implicit_figures');
   if (layout.includes(' no_math ')) on.delete('tex_math_dollars');
 
+  // Typographic substitution, BOTH HALVES OFF BY DEFAULT.
+  //
+  // markdown-it's `typographer` bundles two unrelated behaviours under one
+  // switch, and they are separate core rules underneath -- `replacements` and
+  // `smartquotes` -- so they are offered separately here:
+  //
+  //   replacements  (c)->(c) stays, and so do (r) (tm) +- ... and !!!!!;
+  //                 turning it on substitutes the symbols AND converts
+  //                 -- and --- to en and em dashes, which share the rule.
+  //   smartquotes   "x" -> curly quotes, 'x' -> curly apostrophes.
+  //
+  // Off by default because both rewrite the author's characters. `(c)` is an
+  // item label far more often than it is a copyright sign, and a document
+  // that says (c) and prints © has been altered without being asked. The
+  // failure is silent and it is in the text, not the layout.
+  //
+  // This is the one place pdfulator knowingly departs from commonmark_x.
+  // pandoc's `smart` -- which PFM has on -- does all of this: measured, it
+  // leaves (c) (r) (tm) +- alone but does convert ... and -- and quotes. So
+  // `smart` is no longer mapped onto markdown-it's typographer, because the
+  // two are not the same feature and pretending otherwise gave the worse
+  // half of both. See DIALECT.md.
+  //
+  // layout_features rather than markdown_features because markdown_features
+  // is pandoc's namespace: `smart` already lives there and means something
+  // else, so a `replacements` alongside it would collide with a name pandoc
+  // may yet define. These are pdfulator's own switches and sit on
+  // pdfulator's own axis.
+  //
+  // Folded into `on` rather than read separately because `on` is what the
+  // parser cache is keyed on -- a flag that changes parser construction and
+  // is NOT in the key would serve the first document's parser to the next.
+  if (layout.includes(' replacements ')) on.add('md_replacements');
+  if (layout.includes(' smartquotes '))  on.add('md_smartquotes');
+
   const key = [...on].sort().join(',');
   let parser = FEATURE_PARSERS.get(key);
   if (parser) return parser;
 
   reportFeatureGaps(resolved);
 
+  // `typographer` is the master switch for both core rules, so it goes on if
+  // either half is wanted and the unwanted half is disabled individually.
+  // With neither asked for, it stays off and the author's text is printed as
+  // written.
+  const wantReplacements = on.has('md_replacements');
+  const wantSmartquotes  = on.has('md_smartquotes');
+
   parser = new MarkdownIt({
     html: on.has('raw_html'),
     linkify: true,
-    typographer: on.has('smart'),
+    typographer: wantReplacements || wantSmartquotes,
   });
+
+  if (!wantReplacements) parser.disable('replacements');
+  if (!wantSmartquotes)  parser.disable('smartquotes');
 
   if (on.has('definition_lists')) parser = parser.use(mdDeflist);
   if (on.has('task_lists'))       parser = parser.use(mdTaskLists, { enabled: true });

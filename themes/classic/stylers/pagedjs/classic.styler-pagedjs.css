@@ -312,6 +312,22 @@ h1,h2,h3,h4,h5,h6 {
   h1,h2,h3,h4,h5,h6 {
     page-break-after: avoid;
   }
+
+  /* These were missing here and present in the vivliostyle sheet, which is
+     why the same document broke differently: with nothing forbidding it,
+     Paged.js split a table across a page boundary where vivlio moved it
+     whole to the next page. A table cut mid-row loses its header, and the
+     reader has no way to tell which column they are looking at.
+
+     `break-inside` rather than `page-break-inside`: the latter is the
+     superseded spelling, and Paged.js handles the current one. */
+  pre, blockquote {
+    break-inside: avoid;
+  }
+
+  table, tr, img {
+    break-inside: avoid;
+  }
 }
 
 p,ul,ol,dl,pre,blockquote {
