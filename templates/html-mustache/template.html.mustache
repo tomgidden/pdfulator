@@ -30,7 +30,7 @@
     <div class="pdfulator-slots">
       <div class="slot page-header-left"  data-slot="running-title" id="pageHeader">{{{title}}}</div>
       <div class="slot"                   data-slot="running-section"></div>
-      <div class="slot page-footer-left"  data-slot="attribution" id="pageFooter">{{#copyright}}<span class="footer-copyright">© {{year}} {{copyright}}</span>{{/copyright}}{{#footer}}<span class="footer-text">{{footer}}</span>{{/footer}}{{#revision}}<span class="footer-revision">{{revision}}</span>{{/revision}}{{^copyright}}{{^footer}} {{/footer}}{{/copyright}}</div>
+      <div class="slot page-footer-left"  data-slot="attribution" id="pageFooter">{{#copyright}}<span class="footer-copyright">© {{year}} {{copyright}}</span>{{/copyright}}{{#footer}}<span class="footer-text">{{#copyright}}   |  {{/copyright}}{{footer}}</span>{{/footer}}{{#revision}}<span class="footer-revision">{{#copyright}}   |  {{/copyright}}{{^copyright}}{{#footer}}   |  {{/footer}}{{/copyright}}{{revision}}</span>{{/revision}}{{^copyright}}{{^footer}} {{/footer}}{{/copyright}}</div>
       <div class="slot page-footer-right" data-slot="page-number"></div>
     </div>
 
