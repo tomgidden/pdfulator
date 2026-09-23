@@ -37,3 +37,9 @@ pdfulator.tar.gz.sha256
 .engine
 .prepared/
 cache/
+
+# The markdown-it pagedjs engine writes its generated HTML beside the source
+# document -- pagedjs-cli resolves relative hrefs against the file's own
+# location, so a temp directory would break every relative image. It is
+# removed after each run, and kept deliberately by `--debug`.
+.pdfulator-*.html

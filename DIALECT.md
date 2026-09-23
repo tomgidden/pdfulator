@@ -313,3 +313,39 @@ representation, but must not rewrite Markdown as text.** A pandoc engine may
 manipulate its AST; nothing may run a regular expression over the source and
 call the result parsing. A second parser that disagrees with the first is worse
 than an unsupported feature, because it fails silently and inconsistently.
+
+
+## Where `vivlio` and `pagedjs` still differ
+
+These two engines parse with the same code and fill the same template, so a
+difference between them is not a dialect question at all — it is the
+paginator. That is worth stating here because the two are otherwise
+interchangeable, and someone comparing their output will notice.
+
+**Page breaks around an unbreakable box.** Both engines honour
+`break-inside: avoid`, and both will move a table whole to the next page
+rather than cut it. They disagree about when it fits. Rendering this
+document, Vivliostyle moves a ~90pt table to the next page with ~169pt still
+free; on other documents Paged.js is the conservative one. Bisected against
+Vivliostyle, a table places at `margin-top: 15pt` and breaks at 16pt, while
+its bottom margin makes no difference at all — so roughly a line-height is
+being reserved beyond the box being measured.
+
+**A block at the top of a page.** Vivliostyle collapses its top margin
+against the page box; Paged.js keeps it, so the page sits one line lower.
+
+Neither is a bug in this repository, and the evidence is that everything
+above the paginator is identical. Dumped with `pdfulator --debug` and
+compared: the two engines' intermediate HTML is **byte-identical** once the
+stylesheet hrefs are normalised, and the computed styles for the table match
+exactly in both screen and print media, `break-inside: avoid` included.
+
+Same box, same constraint, different answer. A stylesheet tweak that made one
+document agree would be a per-document hack rather than a fix, and would
+drift again on the next document — so these are recorded rather than papered
+over.
+
+(If you check this yourself: computed styles read in Chrome's default screen
+mode report `break-inside: auto`, because the rule lives in an `@media print`
+block. Emulate print first — DevTools, Cmd+Shift+P, "Show Rendering",
+"Emulate CSS media type" — or you are measuring the wrong thing.)
