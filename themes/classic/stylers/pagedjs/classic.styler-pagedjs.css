@@ -243,22 +243,63 @@ footer span:last-child::after {
   content: "";
 }
 
+/* The document header.
+   
+   These select the classes the SHARED MUSTACHE TEMPLATE emits -- .doc-title,
+   .doc-subtitle, .doc-author and friends -- which this sheet did not style at
+   all. It was written for the pandoc-pagedjs engine and still spoke pandoc's
+   DOM: `article>hgroup>h1` for the title, and an invented `address
+   affiliation` element for authors. The `pagedjs` engine renders the mustache
+   template, so none of that matched and the header fell through to the
+   generic h1 rules -- which is why its title sat 18pt lower than vivlio's,
+   picking up the `margin-top: var(--L)` that .doc-title sets to 0.
+   
+   Ported from stylers/vivliostyle so both engines describe one document. */
+
 article>hgroup {
   line-height: var(--L);
   margin-left: var(--I);
-  margin-bottom: var(--L);
+  margin-bottom: var(--L2);
 }
 
-article>hgroup>h1 {
+article>hgroup>.doc-title {
+  font-family: var(--pdfulator-heading);
+  font-size: var(--S1-75);
+  line-height: var(--L2);
+  font-weight: 700;
+  margin-top: 0;
   margin-left: var(--II);
 }
 
-article>hgroup>address affiliation+.mailto::before {
-  content: ", ";
+.doc-subtitle {
+  font-family: var(--pdfulator-heading);
+  font-size: var(--S1-25);
+  font-weight: 400;
+  margin: 0;
 }
 
-article>hgroup>address affiliation::before {
-  content: ", ";
+.doc-author {
+  font-style: normal;
+  margin-top: var(--L0-5);
+}
+
+.author-affiliation::before {
+  content: ', ';
+}
+
+.author-email::before {
+  content: ' <';
+}
+
+.author-email::after {
+  content: '>';
+}
+
+.doc-project,
+.doc-date,
+.doc-revision {
+  display: block;
+  margin-top: var(--L0-5);
 }
 
 
