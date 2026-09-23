@@ -333,13 +333,13 @@ h4 {
 }
 
 h5 {
-  font-size: var(--S1);
+  font-size: var(--S);
   line-height: var(--L);
   font-weight: 600;
 }
 
 h6 {
-  font-size: var(--S1);
+  font-size: var(--S);
   line-height: var(--L);
   font-weight: 500;
 }
@@ -519,19 +519,37 @@ table caption {
   margin-bottom: 0.75rem;
 }
 
+/* Matched to stylers/vivliostyle. Three differences, and all three changed
+   the table's HEIGHT rather than just its look, which is what made the same
+   table break onto a different page in each engine:
+
+   tbody had `margin-top: 0.5rem` -- a rem, so 5.5pt off the root size rather
+   than the theme's scale -- and a `border-top`. The DIALECT.md table is
+   headerless (`| | |`), so its thead is empty and that border drew a rule
+   vivlio does not draw, above a row vivlio does not offset.
+
+   th had its own `border-top`, drawing a second rule in the same place.
+
+   The four-value paddings were the three-value ones with the left repeated,
+   which is what `0.25rem 0.5rem` already means. Written out they merely
+   looked different in a diff. */
+
+thead {
+  border-bottom: 1px solid #1a1a1a;
+}
+
 tbody {
-  margin-top: 0.5rem;
-  border-top: 1px solid #1a1a1a;
   border-bottom: 1px solid #1a1a1a;
 }
 
 th {
-  border-top: 1px solid #1a1a1a;
-  padding: 0.25rem 0.5rem 0.25rem 0.5rem;
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  font-weight: 600;
 }
 
 td {
-  padding: 0.125rem 0.5rem 0.25rem 0.5rem;
+  padding: 0.125rem 0.5rem 0.25rem;
 }
 
 #TOC li {
